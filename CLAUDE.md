@@ -237,8 +237,52 @@ c2 ∈ {1.0, 0.875, 0.75, 0.625, 0.5, 0.25}，**关键是 a1=a2=2 保持不变�
 
 三个点几乎完全落在论文数字上，图见 `results/n_players_comparison.png`。
 
-**当前还没做的**：Figure 1/2 那种 100×100 网格热力图（Phase 5，纯粹是计算量
-问题，跑一遍大概需要把这里跑 n=2 单点用的时间乘上几千倍，值得放到有更强算
-力/能装 numba 的环境里做）；随机需求冲击、进入退出等其他稳健性检验（论文
+**当前还没做的**：更大规模的网格热力图（见下面 Phase 5，目前只跑了 20×20，
+论文原始规模是 100×100）；随机需求冲击、进入退出等其他稳健性检验（论文
 Section V.C-D，尚未实现）；`anatomy.py` 目前的静态最优反应查找硬编码成 n=2，
 还没泛化到 n=3/4（如果要对 n=3/4 也做偏离分析，需要先做这个泛化）。
+
+## 14. Phase 5 进度记录（2026-09-11）：迁移到 UNC Longleaf 集群 + 网格扫描
+
+本地沙箱只有 2 个 CPU、装不了 numba，Figure 1/2 那种 100×100 网格热力图（一
+共需要 100×100×若干 session 次独立训练）算力上跑不动，这个 Phase 把项目迁移
+到了 UNC Research Computing 的 Longleaf 集群（RHEL 9，SLURM 调度，`general`
+分区单节点 24+ 核）。迁移方式：GitHub 作为唯一事实来源（先 push 到
+`github.com/Maestro-Titarenko/QLearning-Collusion`，Longleaf 上 `git clone`），
+不是手动传文件。环境用 `python/3.12.4` module + venv（`requirements.txt`：
+numpy/scipy/joblib/matplotlib），SSH 用专用 ed25519 key（`~/.ssh/id_ed25519_longleaf`）
+配 `ssh-copy-id` 做免密登录，方便 VS Code Remote-SSH 和自动化脚本直接用。
+
+新增 `experiments/run_grid.py` + `slurm/run_grid.slurm`：按 SLURM job array 切
+分，**每个 array task 固定一个 alpha 值**，task 内部用 joblib 把
+`--cpus-per-task` 指定的核心数用满，跑完这个 alpha 下所有 beta × session 组
+合。断点续跑粒度是 (alpha_idx, beta_idx, seed) 三元组，写到
+`results/grid/alpha_{idx:03d}.jsonl`，任务被杀/超时后重新 sbatch 同样的
+`--array` 会自动跳过已完成的组合。`analysis/plot_grid.py` 把这些文件聚合成
+Figure 1 风格的热力图（单色序列色阶，浅→深蓝对应 Δ 从 0 到 1）。
+
+**beta 网格范围是一个待核实的假设**：CLAUDE.md 里没有记录论文原文的 beta 网
+格端点，这次用的 `[1e-6, 2e-5]`（对数等距）是根据两个已知锚点——"网格中点
+alpha=0.125, beta=1e-5"（第 11 节）和代表性实验点 beta=4e-6——反推的合理区
+间，不是论文原文抄的数字，后续要跟论文核实。
+
+第一次正式跑用了 20×20 网格（alpha 20 档、beta 20 档）、每格点 20 session，
+共 8000 个 session，`max_periods` 设成 200 万（比论文原文的 10 亿低很多，换
+时间可控）。20 个 array task 全部 `COMPLETED`，单个 task 实际只用了 6-11 分
+钟（远低于申请的 6 小时上限）：
+
+| 指标 | 结果 |
+|---|---|
+| 完成格点数 | 269 / 400 |
+| 已完成格点平均 Δ | 0.822（论文 Table 1 "All" 列：0.849） |
+| 落在论文 Figure 1 报告的 [0.70, 0.90] 区间的比例 | 96.3% |
+
+131 个空格点集中在 beta 较小（探索衰减慢）的那一列——这些点上所有 session
+都没能在 200 万期内收敛，是 `max_periods` 设得偏紧的直接后果，不是算法有问
+题。热力图见 `results/grid_heatmap.png`，形状（beta 越大、alpha 适中的区域 Δ
+越高）和论文 Figure 1 定性一致。
+
+**接下来如果要扩大规模**：把 `slurm/run_grid.slurm` 里的 `N_ALPHA`/`N_BETA`/
+`N_SESSIONS` 改大、`sbatch --array` 上限同步改成 `N_ALPHA-1`；beta 较小那一
+列要收敛完整，`--max_periods` 需要显著调大（可能要接近论文原文的量级），单
+个 task 的 `--time` 上限也要相应放宽。
