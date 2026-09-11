@@ -137,3 +137,40 @@ pypi.org/files.pythonhosted.org 的请求，返回 403），所以 numba 装不�
 向量化（因为每个 session 结构完全一致，可以把 session 作为 batch 维度整体用
 NumPy 数组操作推进，而不是 Python 循环跑 1000 个独立 session），或 (b) 在有网
 络访问的环境里另装 numba/joblib 做真正的 JIT + 多进程并行。
+
+## 11. Phase 2 进度记录（2026-09-11）
+
+实测下来，纯 NumPy（无 JIT）实现在这个沙箱里跑到了约 10-11 万期/秒（用了
+`src/simulate.py` 里"每期只查表 + 只检查被更新的那个状态的贪婪动作有没有变"
+这套优化）。沙箱只有 2 个 CPU 核心，用 `joblib.Parallel(n_jobs=2)` 并行跑
+session，单 session 平均约 9-10 秒（含约 170-200 万期才收敛，比论文正文提到
+的"网格中点 alpha=0.125, beta=1e-5 平均 85 万期收敛"要慢，因为代表性实验点的
+beta=4e-6 比网格中点更小，探索衰减更慢）。
+
+`experiments/run_representative.py` 会把结果按 session 追加写到
+`results/representative_experiment.jsonl`（断点续跑：已经跑过的 seed 自动跳
+过），可以分批用不同的 `--start --n_sessions` 调用来跑更多 session。
+
+跑了 140 个 session 的结果（对照论文 Table 1"All"列）：
+
+| 指标 | 复现结果 | 论文 |
+|---|---|---|
+| 平均 Δ | 0.861 | 0.849 |
+| Δ 标准差 | 0.102 | 0.112 |
+| 收敛比例 | 100% | 接近100% |
+| 极限环长度=1（常数价格）占比 | 66.4% | 64.3% |
+| 极限环长度=2 占比 | 21.4% | 23.8% |
+| 极限环长度≥3 占比 | 12.1% | 11.9% |
+
+注意论文 Table 1 的"All"列是整个 100×100 网格的汇总，我们这里只是单一参数点
+（代表性实验点），两者能对得这么近某种程度上比较幸运，不代表网格上每一点都
+会这么吻合——后续如果要做 Figure 1/2 那种网格热力图，还是得真的把网格扫一遍
+才能验证清楚。
+
+`src/simulate.py` 的 `run_session()` 支持 `record_every` 参数记录训练过程中的
+窗口平均利润轨迹，用来画类似论文 Figure 10 的学习曲线（见
+`analysis/plot_representative.py`）。
+
+下一步（Phase 3）：复现第四节"合谋解剖"——用收敛后的极限策略，外生强制一方
+偏离到静态最优反应价，画出脉冲响应（论文 Figure 4/5），验证偏离在贴现利润上
+是否不划算（Table 3 那种"unprofitability of deviations"）。
