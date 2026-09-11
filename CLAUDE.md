@@ -1,0 +1,139 @@
+# Q-learning 算法合谋复现项目
+
+复现对象：Calvano, Calzolari, Denicolò & Pastorello (2020), "Artificial
+Intelligence, Algorithmic Pricing, and Collusion", *American Economic
+Review* 110(10): 3267–3297. 原文 PDF 在 `/root/.claude/uploads/.../calvanoetal2020...pdf`。
+
+这份文件是给后续开发（人类或 Claude Code 会话）用的速查表：写代码时应该对照
+这里的方程和参数，而不是凭记忆重新推导论文。所有方程编号与论文一致。
+
+## 1. 经济环境（论文 Section II.A）
+
+n 个差异化产品 + 1 个外部选择（outside good）。产品 i 在 t 期的需求（logit）：
+
+    q_i,t = exp((a_i - p_i,t) / mu) / [ sum_j exp((a_j - p_j,t) / mu) + exp(a_0 / mu) ]     (5)
+
+- a_i：产品 i 的垂直质量指数
+- a_0：外部选择的（反向）总需求指数
+- mu：横向差异化程度，mu -> 0 时退化为完全替代品（Bertrand 悖论）
+
+单期利润：pi_i,t = (p_i,t - c_i) * q_i,t，c_i 为边际成本（固定成本不影响，只要企业留在市场）。
+
+## 2. 动作空间离散化（Section II.B）
+
+对每组参数，先数值求解一次性博弈（static game）的 Bertrand-Nash 价格向量 p^N
+和联合利润最大化的垄断价格向量 p^M（对称情形下两者都是标量）。可行价格集 A 是
+[p^N - xi*(p^M - p^N),  p^M + xi*(p^M - p^N)] 区间上的 m 个等距点。
+
+基准参数 xi = 0.1，m = 15。
+
+**关键实现优化**：利润 pi_i(a) 只依赖离散动作组合 a = (a_1,...,a_n)（价格索引
+组合），不依赖状态。所以可以在 session 开始前把 m^n 种价格组合的利润矩阵一次性
+预计算好（对称双寡头下是 15x15 = 225 个格子），运行时每期只是查表，不需要重新
+算 exp()。这是把整个模拟做快的核心技巧。
+
+## 3. 状态与记忆（Section II.C）
+
+s_t = {p_{t-1}, ..., p_{t-k}}，k 为记忆长度（基准 k=1，即只记上一期所有玩家的
+价格）。状态空间大小 |S| = m^(n*k)，动作空间 |A| = m。
+
+对称双寡头基准：|S| = 15^2 = 225，|A| = 15。每个 agent 的 Q 矩阵是 225 x 15。
+
+## 4. Q-learning（Section I.A 数学定义，Section II 应用到重复博弈）
+
+Q 函数定义（式 3）：
+
+    Q(s,a) = E[pi | s,a] + delta * E[ max_{a'} Q(s',a') | s,a ]
+
+更新规则（式 4），每期只更新被访问到的 (s_t, a_t) 格子：
+
+    Q_{t+1}(s,a) = (1 - alpha) * Q_t(s,a) + alpha * [ pi_t + delta * max_a Q_t(s_{t+1}, a) ]     if s=s_t, a=a_t
+    Q_{t+1}(s,a) = Q_t(s,a)                                                                       otherwise
+
+- alpha ∈ [0,1]：学习率，基准网格 [0.025, 0.25]
+- delta：贴现因子，基准 0.95
+
+## 5. 探索策略（Section II.D）
+
+epsilon-greedy，探索率随时间指数衰减（式 7）：
+
+    epsilon_t = exp(-beta * t)
+
+beta 越大衰减越快。基准代表性实验点：alpha = 0.15, beta = 4e-6（这是论文正文
+里反复用来出图的"代表性实验"参数，不是网格的中点）。
+
+## 6. Q 矩阵初始化（式 8）
+
+t=0 时，Q_{i,0}(s, a_i) 设为"假设对手均匀随机出价"时 i 选 a_i 的贴现期望利润：
+
+    Q_{i,0}(s, a_i) = [ sum_{a_{-i} in A^{n-1}} pi_i(a_i, a_{-i}) ] / [ (1-delta) * |A|^{n-1} ]
+
+初始状态 s_0 在每个 session 开始时随机抽取。
+
+## 7. 收敛判据（Section III.B）
+
+对每个玩家、每个状态，若最优动作 a_i,t(s) = argmax_a Q_{i,t}(a,s) 连续
+100,000 期不变，则判定收敛。若到 1,000,000,000 期仍未收敛则停止该 session
+（论文用的上限；复现时可以设更低的上限并记录未收敛比例）。
+
+Tie-break 规则：并列时选择最低价格（对称博弈下动作集是纯策略，可能在不可行
+的目标价格附近震荡）。
+
+## 8. 基准参数化（Section II.E，全部来自论文原文）
+
+    n = 2（对称双寡头）
+    c_i = 1
+    a_i - c_i = 1   =>  a_i = 2
+    a_0 = 0
+    mu = 1/4
+    delta = 0.95
+    m = 15
+    xi = 0.1
+    k = 1（一期记忆）
+
+验收基准（论文原文数字，写单元测试时用这些数字做 sanity check）：
+- 静态 Bertrand-Nash 均衡下加成（margin）≈ 47%
+- 完全合谋（垄断）下加成 ≈ 上述的两倍，约 94%
+
+"代表性实验"（论文 Section IV 起大量图表用的那组参数）：
+    alpha = 0.15, beta = 4e-6   （其余同基准）
+
+## 9. 关键产出指标
+
+利润增益（式 9）：
+
+    Delta = (pi_bar - pi^N) / (pi^M - pi^N)
+
+pi_bar 是收敛后的平均单企业利润，pi^N 是静态 Bertrand-Nash 利润，pi^M 是垄断
+（联合利润最大化）利润。Delta=0 对应完全竞争，Delta=1 对应完全合谋。
+
+论文报告的关键数字（用来核对复现结果是否在合理范围）：
+- 全网格（100x100 的 alpha,beta）上 Delta 落在 70%-90% 之间（Figure 1）
+- Table 1 "All" 列：平均 Delta = 0.849，Nash 均衡频率 = 0.505，on-path 平均
+  Q-loss = 0.002
+- n=3 时 Delta ≈ 0.75（调整 beta 后），n=4 时 Delta ≈ 0.56（基准 beta 网格下）
+- 不对称成本（Table 4，c_1=1 固定，c_2 从 1 降到 0.25）：Delta 从 0.849 缓慢降
+  到 0.713
+
+## 10. 项目结构与开发约定
+
+    src/environment.py   logit 需求、利润矩阵、Nash/垄断价格数值求解
+    src/qlearning.py     Q 矩阵初始化、更新规则、epsilon-greedy、单 session 跑法
+    src/simulate.py      多 session 驱动、收敛检测、汇总统计
+    configs/*.yaml        参数集（对应论文不同实验设置）
+    experiments/*.py      跑具体实验、输出到 results/
+    tests/                unittest 测试（本环境无法访问 PyPI，不能装 pytest，
+                           一律用标准库 unittest）
+    analysis/              用 matplotlib 复现论文图表
+
+开发顺序：先验证 environment.py 的数值解对得上第 9 节的基准数字，再验证
+qlearning.py 在一个已知解析解的小 MDP 上收敛正确，然后才跑双寡头对局。跑大规
+模网格实验前，先在代表性参数点上用较少 session 数（几十到几百）验证统计量落
+在合理范围，再决定要不要扩大规模。
+
+**环境限制**：这个 Claude 会话所在的沙箱无法访问 PyPI（网络策略挋掉了
+pypi.org/files.pythonhosted.org 的请求，返回 403），所以 numba 装不上。热循环
+先用纯 NumPy 写，性能不够时可以考虑：(a) 把多个 session 沿数组维度做 lockstep
+向量化（因为每个 session 结构完全一致，可以把 session 作为 batch 维度整体用
+NumPy 数组操作推进，而不是 Python 循环跑 1000 个独立 session），或 (b) 在有网
+络访问的环境里另装 numba/joblib 做真正的 JIT + 多进程并行。
