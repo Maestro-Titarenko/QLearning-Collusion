@@ -1,0 +1,8 @@
+{"seed": 0, "converged": true, "n_periods": 12276926, "delta": 0.5911248054535723, "elapsed_sec": 250.0554597377777}
+{"seed": 1, "converged": true, "n_periods": 5081595, "delta": 0.5663278394591559, "elapsed_sec": 104.88814210891724}
+{"seed": 2, "converged": true, "n_periods": 5580344, "delta": 0.5985398082742884, "elapsed_sec": 119.07812690734863}
+{"seed": 3, "converged": true, "n_periods": 5051665, "delta": 0.5663278394591559, "elapsed_sec": 106.02024126052856}
+{"seed": 4, "converged": true, "n_periods": 11827732, "delta": 0.4918463332999159, "elapsed_sec": 245.06961226463318}
+{"seed": 5, "converged": true, "n_periods": 12292166, "delta": 0.5385439854857847, "elapsed_sec": 256.4453682899475}
+{"seed": 6, "converged": true, "n_periods": 4726054, "delta": 0.6132271004064592, "elapsed_sec": 98.87722778320312}
+{"seed": 7, "converged": true, "n_periods": 6413746, "delta": 0.5663278394591559, "elapsed_sec": 133.11528611183167}
