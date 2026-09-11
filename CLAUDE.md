@@ -171,6 +171,35 @@ beta=4e-6 比网格中点更小，探索衰减更慢）。
 窗口平均利润轨迹，用来画类似论文 Figure 10 的学习曲线（见
 `analysis/plot_representative.py`）。
 
-下一步（Phase 3）：复现第四节"合谋解剖"——用收敛后的极限策略，外生强制一方
-偏离到静态最优反应价，画出脉冲响应（论文 Figure 4/5），验证偏离在贴现利润上
-是否不划算（Table 3 那种"unprofitability of deviations"）。
+## 12. Phase 3 进度记录（2026-09-11）：合谋解剖 / 偏离-惩罚分析
+
+`src/anatomy.py` 实现了论文第四节的核心操作：给定收敛后的极限策略（固定、
+不再探索），在极限环的某个状态 s0 外生强制一方玩家在 τ=1 打静态最优反应
+（对对手当期价格的最优反应，不是随便降价），τ=2 起双方恢复正常策略。因为
+固定策略后系统是确定性有限自动机，价格路径最终一定进入某个循环（鸽笼原
+理），所以贴现利润是精确算的（瞬态段 + 循环段解析求和），不是截断近似。
+
+`experiments/run_anatomy.py` 训练 30 个 session（seed 0-29，和 Phase 2 用同一
+套 alpha/beta，但这次保留了 `SessionResult.policy` 以复用），对每个 session
+收敛后的极限环上每个状态、两种偏离方身份都做一次偏离分析，session 内先对
+"循环起点 x 偏离方身份"取平均（对应论文脚注："算作这个 session 的一个观
+测"），再跨 session 平均。
+
+结果（对照论文 Table 3 / 正文）：
+
+| 指标 | 复现结果 | 论文 |
+|---|---|---|
+| 偏离的平均贴现利润变化 | -2.82% | 约 -3% 到 -4% |
+| 偏离不划算的比例 | 98.9% | >95% |
+
+`analysis/plot_anatomy.py` 画出的脉冲响应图（`results/anatomy_impulse_response.png`）
+和论文 Figure 4 的形状高度吻合：τ=1 价格骤降，τ=2 触底（还略低于 τ=1 的水
+平，即论文说的"overshooting"），随后逐步回升，约 τ=9-10 期回到长期价格附
+近——这正是论文强调的"有限期价格战 + 逐步回归"的 stick-and-carrot 模式，
+而不是永久惩罚的 grim-trigger。
+
+下一步（Phase 4）：稳健性子集——不对称成本（Table 4）、n=3/4 玩家。
+`environment.py` 的非对称 Nash/monopoly 求解器已经在 Phase 1 测试过，
+`simulate.py`/`anatomy.py` 目前假设 n=2（`static_best_response_2p` 硬编码了
+双寡头），n=3/4 需要先把偏离分析泛化到任意 n（Phase 2 的训练部分本身是支持
+任意 n 的，只是没有专门跑过）。

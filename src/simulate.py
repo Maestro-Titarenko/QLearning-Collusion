@@ -37,6 +37,9 @@ class SessionResult:
     delta: float  # 论文式(9)，用所有玩家的平均利润算
     trace_periods: List[int] = field(default_factory=list)
     trace_avg_profit: List[float] = field(default_factory=list)
+    policy: np.ndarray | None = None  # shape (n, S)，收敛后的极限贪婪策略；
+    # 默认保留（数组很小，n=2 时只有 2x225 个 int），供第四节"合谋解剖"的
+    # 偏离/脉冲响应分析复用，不需要重新训练。写 jsonl 落盘时手动排除这个字段。
 
 
 @dataclass
@@ -178,6 +181,7 @@ def run_session(
         cycle_length=len(cycle_states),
         avg_profit=avg_profit,
         delta=delta,
+        policy=policy.copy(),
     )
 
 
