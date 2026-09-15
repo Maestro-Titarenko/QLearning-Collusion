@@ -1,12 +1,8 @@
-# Q-learning Algorithmic Collusion Replication Project
+# Q-learning Algorithmic Collusion: Replication
 
-Replication target: Calvano, Calzolari, Denicolò & Pastorello (2020), "Artificial
+Calvano, Calzolari, Denicolò & Pastorello (2020), "Artificial
 Intelligence, Algorithmic Pricing, and Collusion", *American Economic
 Review* 110(10): 3267–3297. The original PDF is at `/root/.claude/uploads/.../calvanoetal2020...pdf`.
-
-This file is a cheat sheet for future development (human or Claude Code sessions):
-when writing code, check the equations and parameters here instead of re-deriving
-the paper from memory. All equation numbers match the paper.
 
 ## 1. Economic environment (paper Section II.A)
 
@@ -20,7 +16,7 @@ n differentiated products + 1 outside good. Logit demand for product i at time t
   substitutes (Bertrand paradox)
 
 Per-period profit: pi_i,t = (p_i,t - c_i) * q_i,t, where c_i is marginal cost
-(fixed costs don't matter as long as the firm stays in the market).
+(fixed costs are normalized to zero as long as the firm stays in the market).
 
 ## 2. Discretizing the action space (Section II.B)
 
@@ -47,8 +43,7 @@ only last period's prices for all players are remembered). State space size
 Symmetric duopoly baseline: |S| = 15^2 = 225, |A| = 15. Each agent's Q matrix is
 225 x 15.
 
-## 4. Q-learning (Section I.A general definition, Section II applied to the
-repeated game)
+## 4. Q-learning (Section I.A general definition, Section II applied to the repeated game)
 
 Q-function definition (eq. 3):
 
@@ -359,3 +354,32 @@ paper's Figure 1.
 `N_ALPHA-1`; for the low-beta column to converge fully, `--max_periods` would
 need to be increased substantially (likely close to the paper's own scale),
 and each task's `--time` cap would need to be relaxed accordingly.
+
+**Follow-up run (2026-09-14): 10×10 grid, max_periods=10M**. Traded grid
+resolution for per-session convergence budget: a coarser 10×10 grid (10
+alpha values, 10 beta values, same range as before) but with `max_periods`
+raised 5x to 10 million, to test whether the empty low-beta cells above were
+really just a `max_periods` budget problem rather than something structural.
+The old 20×20/2M run's data was archived to `results/grid_20x20_2M/` (and its
+heatmap to `results/grid_heatmap_20x20_2M.png`) rather than deleted, since
+its (alpha_idx, beta_idx) numbering doesn't line up with the new 10-point
+grid — the resumability check keys off index tuples, not actual alpha/beta
+values, so reusing the same `results/grid/` directory for a different grid
+shape would have silently corrupted which combinations get treated as
+"already done." All 10 array tasks `COMPLETED` in 5-12 minutes each (well
+under the 8-hour cap):
+
+| Metric | 20×20, max_periods=2M | 10×10, max_periods=10M |
+|---|---|---|
+| Cells completed | 269 / 400 (67%) | 100 / 100 (100%) |
+| Mean Δ over completed cells | 0.822 | 0.807 |
+| Share in the paper's [0.70, 0.90] range | 96.3% | 98.0% |
+
+Confirms the hypothesis: every cell converges once given enough periods —
+this was purely a `max_periods` budget effect, not a sign that some
+(alpha, beta) combinations fail to converge in principle. The mean Δ ticking
+down slightly (0.822 -> 0.807) makes sense too: the newly-converged cells are
+concentrated at low beta, and low beta (slow exploration decay) is exactly
+where the paper's own Figure 1 shows lower Δ, so including them pulls the
+average down a bit rather than up. Current heatmap:
+`results/grid_heatmap.png` (100% filled, no gaps).
