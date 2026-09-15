@@ -10,7 +10,7 @@
 # Usage:
 #   cd ~/qlearning-collusion
 #   mkdir -p slurm_logs
-#   sbatch --array=0-19 slurm/run_grid.slurm          # 20x20 grid, 20 sessions per cell
+#   sbatch --array=0-9 slurm/run_grid.slurm          # 10x10 grid, 20 sessions per cell
 #
 # Resumable: if an array task doesn't finish (killed on timeout),
 # resubmitting the same --array skips (beta_idx, seed) combinations already
@@ -22,7 +22,7 @@
 
 #SBATCH --job-name=qcollusion-grid
 #SBATCH --partition=general
-#SBATCH --time=06:00:00
+#SBATCH --time=08:00:00
 #SBATCH --cpus-per-task=24
 #SBATCH --mem=48G
 #SBATCH --account=rc_classwork_pi
@@ -31,10 +31,10 @@
 
 set -euo pipefail
 
-N_ALPHA=20
-N_BETA=20
+N_ALPHA=10
+N_BETA=10
 N_SESSIONS=20
-MAX_PERIODS=2000000
+MAX_PERIODS=10000000
 CONV_THRESHOLD=100000
 
 module purge
