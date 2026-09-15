@@ -1,16 +1,20 @@
 """
-论文 Section IV"合谋解剖"（Anatomy of Collusion）：偏离-惩罚分析。
+Paper Section IV, "Anatomy of Collusion": deviation-punishment analysis.
 
-核心操作（对照论文原文，Figure 4/5、Table 2/3）：从收敛后的极限环上的某个
-状态 s0 出发，外生地强制一方玩家在 τ=1 期偏离到"静态最优反应"（即在对手
-仍按 s0 隐含的价格出价的前提下，偏离方选出让自己当期利润最大化的价格），
-从 τ=2 期起双方都恢复按各自学到的（固定、不再探索的）策略行动，观察价格
-如何演化、偏离在贴现利润上是否划算。
+Core operation (matching Figure 4/5 and Table 2/3 in the paper): starting
+from some state s0 on the converged limit cycle, exogenously force one player
+to deviate to the "static best response" at τ=1 (i.e. assuming the rival
+still prices at what s0 implies, the deviator picks the price that maximizes
+its own per-period profit), then from τ=2 onward both players resume their
+learned (fixed, no longer exploring) policies, and observe how prices evolve
+and whether the deviation pays off in discounted profit.
 
-这里的关键简化和 simulate.py 一致：策略固定后，整个系统是一个确定性有限自
-动机（状态数 S 有限），所以任何一条从某点出发、按固定策略推演的价格路径最
-终一定会进入某个循环（鸽笼原理）。这让我们可以精确地（不是靠截断来近似）
-算出无限期贴现利润，而不需要数值截断误差。
+The key simplification here matches simulate.py: once the policy is fixed,
+the whole system is a deterministic finite automaton (finitely many states),
+so any price path rolled forward from a given point under the fixed policy
+is guaranteed to eventually enter some cycle (pigeonhole principle). This
+lets us compute the infinite-horizon discounted profit exactly (not by
+truncation), with no numerical truncation error.
 """
 from __future__ import annotations
 
@@ -21,8 +25,9 @@ import numpy as np
 
 
 def decode_state(state: int, n: int, m: int, strides: np.ndarray) -> np.ndarray:
-    """把展平的整数状态解码回每个玩家的价格索引（strides 的定义和
-    simulate._encode_strides 一致：玩家 0 是最高位）。"""
+    """Decode a flattened integer state back into each player's price index
+    (strides follow the same convention as simulate._encode_strides: player
+    0 is the most significant digit)."""
     actions = np.empty(n, dtype=int)
     remaining = state
     for idx in range(n):
@@ -32,21 +37,23 @@ def decode_state(state: int, n: int, m: int, strides: np.ndarray) -> np.ndarray:
 
 
 def static_best_response_2p(profit_matrix_full: np.ndarray, deviating_player: int, rival_action: int) -> int:
-    """双寡头（n=2）情形下，给定对手的价格索引，偏离方的静态最优反应价格索引。
-    profit_matrix_full 是 build_profit_matrix() 的原始（未展平）输出，
-    shape (m, m, 2)。"""
+    """For the duopoly (n=2) case, given the rival's price index, the
+    deviator's static-best-response price index. profit_matrix_full is the
+    raw (unflattened) output of build_profit_matrix(), shape (m, m, 2)."""
     if deviating_player == 0:
         profits_given_a0 = profit_matrix_full[:, rival_action, 0]
     elif deviating_player == 1:
         profits_given_a0 = profit_matrix_full[rival_action, :, 1]
     else:
-        raise ValueError("这个函数目前只支持 n=2 的双寡头")
+        raise ValueError("This function currently only supports the n=2 duopoly")
     return int(np.argmax(profits_given_a0))
 
 
 def _decompose_trajectory(policy: np.ndarray, strides: np.ndarray, first_state: int, max_steps: int) -> Tuple[List[int], List[int]]:
-    """从 first_state 开始，按固定策略确定性推演，拆成"进入循环前的瞬态部分"
-    和"循环部分"。返回 (transient_states, cycle_states)。"""
+    """Starting from first_state, roll forward deterministically under the
+    fixed policy and split the path into a "transient part before entering
+    the cycle" and a "cyclic part." Returns (transient_states,
+    cycle_states)."""
     visited = {}
     seq: List[int] = []
     state = first_state
@@ -57,7 +64,7 @@ def _decompose_trajectory(policy: np.ndarray, strides: np.ndarray, first_state: 
         visited[state] = step
         seq.append(state)
         state = int(np.dot(policy[:, state], strides))
-    raise RuntimeError("未能在 max_steps 内找到极限环")
+    raise RuntimeError("Failed to find a limit cycle within max_steps")
 
 
 def discounted_value_from(
@@ -68,10 +75,13 @@ def discounted_value_from(
     first_state: int,
     max_steps: int,
 ) -> np.ndarray:
-    """精确计算：从 first_state（即"第 1 期实际发生的价格状态"）开始，按固定
-    策略永远玩下去，每个玩家的无限期贴现利润 sum_{t=0}^inf delta^t * pi(s_t)。
-    因为轨迹最终周期性，拆成"瞬态 + 循环"两部分算精确解析和，不做截断近似：
-        V = sum_{瞬态} delta^t * r_t  +  delta^{瞬态长度} * (循环内 delta 加权和) / (1 - delta^L)
+    """Exact computation: starting from first_state (i.e. "the price state
+    that actually realizes in period 1"), playing forever under the fixed
+    policy, each player's infinite-horizon discounted profit
+    sum_{t=0}^inf delta^t * pi(s_t). Because the trajectory is eventually
+    periodic, this is split into a "transient + cycle" exact analytic sum,
+    with no truncation approximation:
+        V = sum_{transient} delta^t * r_t  +  delta^{transient length} * (discount-weighted sum over the cycle) / (1 - delta^L)
     """
     transient, cycle = _decompose_trajectory(policy, strides, first_state, max_steps)
     n = profit_matrix_flat.shape[1]
@@ -90,10 +100,10 @@ def discounted_value_from(
 class DeviationOutcome:
     s0: int
     deviating_player: int
-    price_path: np.ndarray  # shape (horizon+1, n)，索引 0 是 τ=0（偏离前）
-    v_baseline: np.ndarray  # shape (n,)，不偏离时从 τ=1 起的贴现利润
-    v_deviation: np.ndarray  # shape (n,)，偏离后从 τ=1 起的贴现利润
-    pct_gain_deviator: float  # 偏离方的贴现利润变化百分比（论文 Table 3 Panel A 的量）
+    price_path: np.ndarray  # shape (horizon+1, n); index 0 is τ=0 (before the deviation)
+    v_baseline: np.ndarray  # shape (n,); discounted profit from τ=1 onward without deviating
+    v_deviation: np.ndarray  # shape (n,); discounted profit from τ=1 onward after deviating
+    pct_gain_deviator: float  # percentage change in the deviator's discounted profit (the quantity in the paper's Table 3 Panel A)
     profitable: bool
 
 
@@ -110,29 +120,33 @@ def analyze_deviation(
     horizon: int,
     max_steps: int,
 ) -> DeviationOutcome:
-    """对一个具体的 (起始状态 s0, 偏离方) 组合，算出价格脉冲响应路径和偏离
-    是否划算。目前 static_best_response_2p 只支持 n=2，所以这个函数也限定
-    n=2（和论文 Section IV 的基准实验设定一致）。"""
+    """For one concrete (starting state s0, deviator) combination, compute
+    the price impulse-response path and whether the deviation pays off.
+    static_best_response_2p currently only supports n=2, so this function is
+    likewise restricted to n=2 (matching the paper's Section IV baseline
+    experiment setup)."""
     if n != 2:
-        raise NotImplementedError("目前只实现了双寡头 (n=2) 的偏离分析")
+        raise NotImplementedError("Only the duopoly (n=2) deviation analysis is implemented so far")
 
     rival = 1 - deviating_player
     s0_actions = decode_state(s0, n, m, strides)
 
-    # τ=1：偏离方打静态最优反应，对手仍按自己的正常策略出价
+    # τ=1: the deviator plays the static best response, while the rival
+    # still prices according to its normal policy
     dev_action = static_best_response_2p(profit_matrix_full, deviating_player, s0_actions[rival])
     actions_tau1 = policy[:, s0].copy()
     actions_tau1[deviating_player] = dev_action
     s1_deviation = int(np.dot(actions_tau1, strides))
 
-    # 不偏离的基准：τ=1 起双方都按正常策略走
+    # No-deviation baseline: both players follow their normal policy from τ=1 onward
     s1_baseline = int(np.dot(policy[:, s0], strides))
 
     v_baseline = discounted_value_from(policy, profit_matrix_flat, strides, delta, s1_baseline, max_steps)
     v_deviation = discounted_value_from(policy, profit_matrix_flat, strides, delta, s1_deviation, max_steps)
 
-    # 价格路径（用于画脉冲响应图）：τ=0 是偏离前的状态，τ=1 是刚才算出的
-    # actions_tau1，τ=2 起按正常策略继续推进
+    # Price path (for the impulse-response plot): τ=0 is the pre-deviation
+    # state, τ=1 is the actions_tau1 just computed, and from τ=2 onward it
+    # continues under the normal policy
     price_path = [s0_actions, actions_tau1]
     state = s1_deviation
     for _ in range(horizon - 1):

@@ -1,8 +1,9 @@
 """
-复现论文 Section V.A（企业数量的稳健性）：n=3、n=4，仍用同一套代表性
-alpha=0.15, beta=4e-6。断点续跑（按 n 存到不同文件）。
+Reproduces the paper's Section V.A (robustness to the number of firms):
+n=3, n=4, still using the same representative alpha=0.15, beta=4e-6.
+Resumable (results for each n go to a separate file).
 
-用法：
+Usage:
     python3 experiments/run_n_players.py --n 3 --n_sessions 20
     python3 experiments/run_n_players.py --n 4 --n_sessions 10
 """
@@ -64,15 +65,15 @@ def main() -> None:
 
     todo = [s for s in range(args.start, args.start + args.n_sessions) if s not in done_seeds]
     if not todo:
-        print("都已经跑过了")
+        print("All requested seeds have already been run")
         return
 
-    print(f"n={args.n}，状态空间大小 S={params.m**params.n}，跑 {len(todo)} 个 session（seed={todo[0]}..{todo[-1]}）")
+    print(f"n={args.n}, state space size S={params.m**params.n}, running {len(todo)} session(s) (seed={todo[0]}..{todo[-1]})")
     t0 = time.time()
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(_run_one)(seed, params, profit_matrix_flat, pi_nash, pi_monopoly, args.max_periods) for seed in todo
     )
-    print(f"完成，耗时 {time.time()-t0:.1f}s")
+    print(f"Done, elapsed {time.time()-t0:.1f}s")
 
     os.makedirs(os.path.dirname(results_path), exist_ok=True)
     with open(results_path, "a") as f:
@@ -82,7 +83,7 @@ def main() -> None:
     all_rows = [json.loads(l) for l in open(results_path)]
     deltas = np.array([r["delta"] for r in all_rows if r["converged"]])
     conv_rate = np.mean([r["converged"] for r in all_rows])
-    print(f"\n累计 {len(all_rows)} 个 session：收敛率={conv_rate:.2f}，收敛 session 的平均 Delta={deltas.mean():.3f}（标准差 {deltas.std():.3f}）")
+    print(f"\n{len(all_rows)} session(s) total: convergence rate={conv_rate:.2f}, mean Delta over converged sessions={deltas.mean():.3f} (std {deltas.std():.3f})")
 
 
 if __name__ == "__main__":

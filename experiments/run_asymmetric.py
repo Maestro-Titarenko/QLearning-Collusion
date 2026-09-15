@@ -1,14 +1,19 @@
 """
-复现论文 Table 4（成本不对称）。c1=1 固定，c2 按论文表头的取值变化，a_1=a_2=2
-保持不变（质量对称，纯粹是成本不对称——这是论文 Table 4 的真实设定）。用和
-Table 4 一样的代表性 alpha/beta。
+Reproduces the paper's Table 4 (cost asymmetry). c1=1 fixed, c2 varies over
+the values in the paper's table header, with a_1=a_2=2 held constant
+(quality symmetric, purely a cost asymmetry — this is the actual Table 4
+setup in the paper). Uses the same representative alpha/beta as Table 4.
 
-**开发时踩过的坑**：第一版代码为了"保持 a_i-c_i=1"把 a_2 也跟着 c2 一起调整
-（a_2=c2+1），结果整个博弈在数学上和 c2=1 的基准完全等价（只是价格整体平移），
-2 号企业的静态 Nash 市场份额恒等于 0.5，和论文 Table 4 里份额随 c2 下降从 0.5
-一路升到 0.722 的模式完全对不上——这时候市场份额这个量本身就是很好的一个
-"合理性检验"：如果它没有随不对称程度变化，说明不对称没有真的被引入。改成
-a 恒定、只变成本后，市场份额才开始正确地随 c2 变化。
+**A pitfall hit during development**: the first version of the code, trying
+to "preserve a_i-c_i=1," also adjusted a_2 along with c2 (a_2=c2+1), which
+made the whole game mathematically equivalent to the c2=1 baseline (just a
+uniform price shift), leaving firm 2's static Nash market share stuck at
+exactly 0.5 — completely inconsistent with the paper's Table 4, where the
+share rises from 0.5 all the way to 0.722 as c2 falls. This turned out to be
+a good "sanity check" in its own right: if the market share doesn't move at
+all with the degree of asymmetry, the asymmetry wasn't actually introduced.
+After fixing a to be constant and varying only cost, the market share began
+to move correctly with c2.
 """
 from __future__ import annotations
 
@@ -30,7 +35,7 @@ ALPHA = 0.15
 BETA = 4e-6
 MAX_PERIODS = 4_000_000
 CONV_THRESHOLD = 100_000
-C2_VALUES = [1.0, 0.875, 0.75, 0.625, 0.5, 0.25]  # 论文 Table 4 的表头
+C2_VALUES = [1.0, 0.875, 0.75, 0.625, 0.5, 0.25]  # the paper's Table 4 header values
 
 RESULTS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results", "asymmetric_experiment.json")
 
@@ -54,7 +59,7 @@ def main() -> None:
     if os.path.exists(RESULTS_PATH):
         with open(RESULTS_PATH) as f:
             all_results = json.load(f)
-        print(f"断点续跑：已有 {list(all_results.keys())} 的结果，跳过这些 c2")
+        print(f"Resuming: already have results for {list(all_results.keys())}, skipping these c2 values")
 
     for c2 in C2_VALUES:
         if str(c2) in all_results:
@@ -71,14 +76,14 @@ def main() -> None:
         q_nash = demand(p_nash, params.a, params.a0, params.mu)
         share2 = float(q_nash[1] / (q_nash[0] + q_nash[1]))
 
-        print(f"c2={c2}: p_nash={p_nash}, p_monopoly={p_monopoly}, 2's Nash market share={share2:.3f}")
+        print(f"c2={c2}: p_nash={p_nash}, p_monopoly={p_monopoly}, firm 2's Nash market share={share2:.3f}")
 
         t0 = time.time()
         results = Parallel(n_jobs=args.n_jobs)(
             delayed(_run_one)(seed, params, profit_matrix_flat, float(pi_nash_vec.mean()), float(pi_monopoly_vec.mean()))
             for seed in range(args.n_sessions)
         )
-        print(f"  {args.n_sessions} 个 session 耗时 {time.time()-t0:.1f}s")
+        print(f"  {args.n_sessions} session(s) took {time.time()-t0:.1f}s")
 
         all_results[str(c2)] = {
             "p_nash": p_nash.tolist(),
@@ -88,14 +93,15 @@ def main() -> None:
             "share2_nash": share2,
             "sessions": results,
         }
-        # 每跑完一个 c2 就落盘一次，避免单次调用超时把之前跑完的结果也丢掉
+        # Save to disk after each c2 finishes, so a timeout on a later call
+        # doesn't lose results already computed
         os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
         with open(RESULTS_PATH, "w") as f:
             json.dump(all_results, f)
-        print(f"  已保存 c2={c2} 的结果到 {RESULTS_PATH}")
+        print(f"  Saved results for c2={c2} to {RESULTS_PATH}")
 
-    print("\n=== 汇总（对照论文 Table 4）===")
-    print(f"{'c2':>6} {'2份额':>8} {'Delta':>8} {'pi1/pi1^N':>10} {'pi2/pi2^N':>10}")
+    print("\n=== Summary (compared against the paper's Table 4) ===")
+    print(f"{'c2':>6} {'share2':>8} {'Delta':>8} {'pi1/pi1^N':>10} {'pi2/pi2^N':>10}")
     for c2 in C2_VALUES:
         r = all_results[str(c2)]
         deltas = np.array([s["delta"] for s in r["sessions"]])

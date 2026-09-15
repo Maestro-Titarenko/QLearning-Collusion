@@ -1,10 +1,12 @@
 """
-src/anatomy.py 的验收测试。核心思路和 test_qlearning_sanity.py 一样：构造一个
-手算得出解析解的简单场景（这里是"策略永远选同一个动作"的常数价格情形），
-不依赖训练过程，只测偏离分析本身的数学逻辑（状态编解码、精确贴现求和、
-静态最优反应）。
+Acceptance tests for src/anatomy.py. Same core idea as
+test_qlearning_sanity.py: construct a simple scenario with a hand-computable
+closed form (here, a "policy always picks the same action" constant-price
+case), independent of any training process, testing only the deviation
+analysis's own math (state encode/decode, exact discounted summation, static
+best response).
 
-运行：python3 -m unittest discover -s tests -v
+Run with: python3 -m unittest discover -s tests -v
 """
 from __future__ import annotations
 
@@ -30,9 +32,11 @@ class TestDecodeState(unittest.TestCase):
 
 
 class TestDiscountedValueClosedForm(unittest.TestCase):
-    """策略如果对所有状态都选同一个动作组合，价格永远不变（极限环长度=1），
-    贴现利润有解析解 profit/(1-delta)，用来验证 discounted_value_from 的
-    "瞬态+循环"分解没有算错。"""
+    """If a policy picks the same action combination at every state, the
+    price never changes (limit-cycle length = 1), and the discounted profit
+    has a closed form, profit/(1-delta), used to verify that
+    discounted_value_from's "transient + cycle" decomposition is computed
+    correctly."""
 
     def setUp(self) -> None:
         self.params = EconParams.baseline(n=2)
@@ -45,8 +49,8 @@ class TestDiscountedValueClosedForm(unittest.TestCase):
 
     def test_constant_policy_matches_geometric_series(self) -> None:
         m, S = self.params.m, self.params.m ** self.params.n
-        constant_action = np.array([7, 7])  # 网格中点附近随便挑一个动作组合
-        policy = np.tile(constant_action[:, None], (1, S))  # 不管什么状态都选同一个动作
+        constant_action = np.array([7, 7])  # an arbitrary action combination near the middle of the grid
+        policy = np.tile(constant_action[:, None], (1, S))  # picks the same action regardless of state
 
         first_state = int(np.dot(constant_action, self.strides))
         V = discounted_value_from(policy, self.profit_matrix_flat, self.strides, self.params.delta, first_state, max_steps=S + 1)
@@ -56,13 +60,17 @@ class TestDiscountedValueClosedForm(unittest.TestCase):
         np.testing.assert_allclose(V, expected_V, atol=1e-10)
 
     def test_deviation_from_constant_policy_is_unprofitable(self) -> None:
-        """在一个（人为构造的）"永远合谋在垄断价格附近"的常数策略下，偏离到
-        静态最优反应应该在当期有利可图，但因为这个简单策略里偏离之后大家还是
-        立刻恢复常数策略（没有真正的惩罚机制），偏离在贴现利润上应该是划算
-        的——这是用来确认"划算/不划算"的判断逻辑本身没有反过来。
+        """Under a (deliberately constructed) constant policy that "always
+        colludes near the monopoly price," deviating to the static best
+        response should be profitable in the current period — but since this
+        simple policy has everyone snap right back to the constant policy
+        immediately after a deviation (no real punishment mechanism), the
+        deviation should also be profitable in discounted terms. This
+        confirms that the "profitable / not profitable" judgment logic
+        itself isn't inverted.
         """
         m, S = self.params.m, self.params.m ** self.params.n
-        high_price_action = np.array([13, 13])  # 网格里偏高的价格，比较接近垄断
+        high_price_action = np.array([13, 13])  # a fairly high price on the grid, close to monopoly
         policy = np.tile(high_price_action[:, None], (1, S))
 
         s0 = int(np.dot(high_price_action, self.strides))
@@ -70,8 +78,9 @@ class TestDiscountedValueClosedForm(unittest.TestCase):
             policy, self.profit_matrix_full, self.profit_matrix_flat, self.strides, self.params.delta,
             s0, deviating_player=0, n=2, m=m, horizon=10, max_steps=S + 1,
         )
-        # 没有惩罚机制的策略下，打一次最优反应赚一次多的钱、之后立刻无痛回到
-        # 原来的合谋价格，偏离必然是划算的
+        # With no punishment mechanism, playing the best response once for
+        # extra profit and then snapping right back to the same collusive
+        # price with no penalty must make the deviation profitable
         self.assertTrue(outcome.profitable)
         self.assertGreater(outcome.pct_gain_deviator, 0)
 
@@ -83,10 +92,12 @@ class TestStaticBestResponse(unittest.TestCase):
         grids = build_price_grid(params, p_nash, p_monopoly)
         profit_matrix_full = build_profit_matrix(params, grids)
 
-        rival_action = 10  # 对手打一个偏高的价格
+        rival_action = 10  # the rival plays a fairly high price
         best = static_best_response_2p(profit_matrix_full, deviating_player=0, rival_action=rival_action)
-        # 最优反应下的利润应该 >= 直接"照抄"对手价格的利润（不是全局最优的
-        # 严格证明，只是一个很弱、但能抓出符号错误的合理性检验）
+        # Profit under the best response should be >= profit from simply
+        # "matching" the rival's price (not a strict proof of global
+        # optimality, just a weak sanity check that would still catch a
+        # sign error)
         profit_best = profit_matrix_full[best, rival_action, 0]
         profit_matching = profit_matrix_full[rival_action, rival_action, 0]
         self.assertGreaterEqual(profit_best, profit_matching)

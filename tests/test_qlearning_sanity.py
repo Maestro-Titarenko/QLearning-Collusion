@@ -1,20 +1,29 @@
 """
-纯 Q-learning 实现正确性检验，完全脱离双寡头定价博弈的经济环境——用两个"已知
-解析解/可独立数值求解"的小型 MDP 来测，这样如果测试失败，问题一定出在
-qlearning.py 本身（更新公式、epsilon-greedy、状态索引），而不会和 environment.py
-的经济学建模混在一起，方便定位 bug。
+Correctness tests for the pure Q-learning implementation, completely
+decoupled from the duopoly pricing-game economic environment — tested
+against two small MDPs with "known closed-form or independently
+computable" solutions, so that if a test fails, the problem must be in
+qlearning.py itself (the update formula, epsilon-greedy, state indexing)
+rather than getting tangled up with environment.py's economic modeling,
+which makes bugs easier to locate.
 
-测试 1：单状态老虎机（自循环）。这个特例可以手推出闭式解：
+Test 1: a single-state bandit (self-loop). This special case has a
+hand-derivable closed form:
     Q*(s,a) = r_a + delta * r_max / (1-delta)
-（含义：选 a 拿一次性奖励 r_a，之后永远按最优动作走，贴现价值是 r_max/(1-delta)）
-不依赖 Q-learning 或价值迭代的数值实现，是纯解析的基准。
+(meaning: pick a for a one-time reward r_a, then follow the optimal action
+forever after, with discounted value r_max/(1-delta)). This doesn't rely on
+any numerical implementation of Q-learning or value iteration — it's a
+purely analytic benchmark.
 
-测试 2：3 状态、3 动作、确定性转移的随机 MDP（固定种子）。这里状态会真正变化，
-足以检验 Bellman 更新里 "用 next_state 的 max_a' Q(next_state,a')" 这一步有没
-有写对（比如状态索引错位这种 bug，在单状态测试里是测不出来的）。真值用价值
-迭代（value iteration）独立算出来，和 Q-learning 训练出的 Q 矩阵对比。
+Test 2: a random MDP with 3 states, 3 actions, and deterministic
+transitions (fixed seed). Here the state actually changes, which is enough
+to check whether the Bellman update's "use max_a' Q(next_state,a') for
+next_state" step is implemented correctly (a bug like a misaligned state
+index wouldn't show up in the single-state test). The ground truth is
+computed independently via value iteration and compared against the Q
+matrix Q-learning converges to.
 
-运行：python3 -m unittest discover -s tests -v
+Run with: python3 -m unittest discover -s tests -v
 """
 from __future__ import annotations
 
@@ -26,14 +35,15 @@ from src.qlearning import greedy_policy, train_single_agent
 
 
 class TestBanditClosedForm(unittest.TestCase):
-    """单状态、确定性奖励的老虎机，Q* 有解析解。"""
+    """A single-state, deterministic-reward bandit, where Q* has a closed
+    form."""
 
     def setUp(self) -> None:
         self.rewards = np.array([0.1, 0.5, 0.9, 0.3, 0.7])
         self.delta = 0.9
 
         def bandit_step(state, action, rng):
-            return self.rewards[action], state  # 自循环：回到唯一的状态
+            return self.rewards[action], state  # self-loop: back to the only state
 
         self.step_fn = bandit_step
 
@@ -71,9 +81,11 @@ class TestBanditClosedForm(unittest.TestCase):
 
 
 class TestMultiStateMDPAgainstValueIteration(unittest.TestCase):
-    """3 状态、3 动作、确定性转移的随机 MDP（固定种子生成），真值用价值迭代
-    独立算出（不复用 qlearning.py 里的任何函数），验证 Q-learning 收敛的极限
-    和真正的 Bellman 最优 Q 函数一致。"""
+    """A random MDP with 3 states, 3 actions, and deterministic transitions
+    (generated with a fixed seed); the ground truth is computed
+    independently via value iteration (reusing none of qlearning.py's
+    functions), verifying that Q-learning's converged limit matches the
+    true Bellman-optimal Q-function."""
 
     def setUp(self) -> None:
         self.n_states, self.n_actions = 3, 3

@@ -1,8 +1,9 @@
 """
-跑论文的"代表性实验"参数点（alpha=0.15, beta=4e-6，基准对称双寡头），
-用来复现 Table 1 的统计量。
+Run the paper's "representative experiment" parameter point (alpha=0.15,
+beta=4e-6, symmetric duopoly baseline) to reproduce the Table 1 statistics.
 
-用法（可分批跑，断点续跑——已经跑过的 session id 会被跳过）：
+Usage (can be run in batches, resumable — already-run session ids are
+skipped):
     python3 experiments/run_representative.py --n_sessions 50 --start 0
     python3 experiments/run_representative.py --n_sessions 50 --start 50
 """
@@ -65,7 +66,7 @@ def main() -> None:
     pi_nash = float(profits(p_nash, params.c, params.a, params.a0, params.mu).mean())
     pi_monopoly = float(profits(p_monopoly, params.c, params.a, params.a0, params.mu).mean())
 
-    # 断点续跑：已经在结果文件里的 seed 就跳过
+    # Resumable: skip any seed already present in the results file
     done_seeds = set()
     if os.path.exists(RESULTS_PATH):
         with open(RESULTS_PATH) as f:
@@ -75,22 +76,22 @@ def main() -> None:
 
     todo = [s for s in range(args.start, args.start + args.n_sessions) if s not in done_seeds]
     if not todo:
-        print(f"seeds {args.start}..{args.start + args.n_sessions - 1} 都已经跑过，跳过。")
+        print(f"seeds {args.start}..{args.start + args.n_sessions - 1} have all already been run, skipping.")
         return
 
-    print(f"跑 {len(todo)} 个新 session（seed={todo[0]}..{todo[-1]}），alpha={ALPHA}, beta={BETA}, n_jobs={args.n_jobs}")
+    print(f"Running {len(todo)} new session(s) (seed={todo[0]}..{todo[-1]}), alpha={ALPHA}, beta={BETA}, n_jobs={args.n_jobs}")
     t0 = time.time()
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(_run_one)(seed, params, profit_matrix_flat, pi_nash, pi_monopoly) for seed in todo
     )
     elapsed = time.time() - t0
-    print(f"完成 {len(todo)} 个 session，总耗时 {elapsed:.1f}s（平均每个 {elapsed/len(todo):.1f}s）")
+    print(f"Finished {len(todo)} session(s), total elapsed {elapsed:.1f}s (average {elapsed/len(todo):.1f}s each)")
 
     os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
     with open(RESULTS_PATH, "a") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
-    print(f"结果已追加写入 {RESULTS_PATH}")
+    print(f"Results appended to {RESULTS_PATH}")
 
 
 if __name__ == "__main__":

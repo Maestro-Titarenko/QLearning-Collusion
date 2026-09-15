@@ -1,87 +1,103 @@
-# Q-learning 算法合谋复现项目
+# Q-learning Algorithmic Collusion Replication Project
 
-复现对象：Calvano, Calzolari, Denicolò & Pastorello (2020), "Artificial
+Replication target: Calvano, Calzolari, Denicolò & Pastorello (2020), "Artificial
 Intelligence, Algorithmic Pricing, and Collusion", *American Economic
-Review* 110(10): 3267–3297. 原文 PDF 在 `/root/.claude/uploads/.../calvanoetal2020...pdf`。
+Review* 110(10): 3267–3297. The original PDF is at `/root/.claude/uploads/.../calvanoetal2020...pdf`.
 
-这份文件是给后续开发（人类或 Claude Code 会话）用的速查表：写代码时应该对照
-这里的方程和参数，而不是凭记忆重新推导论文。所有方程编号与论文一致。
+This file is a cheat sheet for future development (human or Claude Code sessions):
+when writing code, check the equations and parameters here instead of re-deriving
+the paper from memory. All equation numbers match the paper.
 
-## 1. 经济环境（论文 Section II.A）
+## 1. Economic environment (paper Section II.A)
 
-n 个差异化产品 + 1 个外部选择（outside good）。产品 i 在 t 期的需求（logit）：
+n differentiated products + 1 outside good. Logit demand for product i at time t:
 
     q_i,t = exp((a_i - p_i,t) / mu) / [ sum_j exp((a_j - p_j,t) / mu) + exp(a_0 / mu) ]     (5)
 
-- a_i：产品 i 的垂直质量指数
-- a_0：外部选择的（反向）总需求指数
-- mu：横向差异化程度，mu -> 0 时退化为完全替代品（Bertrand 悖论）
+- a_i: vertical quality index of product i
+- a_0: (inverse) aggregate demand index for the outside good
+- mu: degree of horizontal differentiation; mu -> 0 degenerates to perfect
+  substitutes (Bertrand paradox)
 
-单期利润：pi_i,t = (p_i,t - c_i) * q_i,t，c_i 为边际成本（固定成本不影响，只要企业留在市场）。
+Per-period profit: pi_i,t = (p_i,t - c_i) * q_i,t, where c_i is marginal cost
+(fixed costs don't matter as long as the firm stays in the market).
 
-## 2. 动作空间离散化（Section II.B）
+## 2. Discretizing the action space (Section II.B)
 
-对每组参数，先数值求解一次性博弈（static game）的 Bertrand-Nash 价格向量 p^N
-和联合利润最大化的垄断价格向量 p^M（对称情形下两者都是标量）。可行价格集 A 是
-[p^N - xi*(p^M - p^N),  p^M + xi*(p^M - p^N)] 区间上的 m 个等距点。
+For each parameter set, first numerically solve the static (one-shot) game for
+the Bertrand-Nash price vector p^N and the joint-profit-maximizing (monopoly)
+price vector p^M (both scalars in the symmetric case). The feasible price set A
+is m equally spaced points on [p^N - xi*(p^M - p^N), p^M + xi*(p^M - p^N)].
 
-基准参数 xi = 0.1，m = 15。
+Baseline parameters: xi = 0.1, m = 15.
 
-**关键实现优化**：利润 pi_i(a) 只依赖离散动作组合 a = (a_1,...,a_n)（价格索引
-组合），不依赖状态。所以可以在 session 开始前把 m^n 种价格组合的利润矩阵一次性
-预计算好（对称双寡头下是 15x15 = 225 个格子），运行时每期只是查表，不需要重新
-算 exp()。这是把整个模拟做快的核心技巧。
+**Key implementation optimization**: profit pi_i(a) depends only on the discrete
+action combination a = (a_1,...,a_n) (the combination of price indices), not on
+the state. So the profit matrix for all m^n price combinations can be
+precomputed once before a session starts (225 = 15x15 cells for the symmetric
+duopoly). At runtime each period is just a table lookup — no need to recompute
+exp(). This is the core trick that makes the whole simulation fast.
 
-## 3. 状态与记忆（Section II.C）
+## 3. State and memory (Section II.C)
 
-s_t = {p_{t-1}, ..., p_{t-k}}，k 为记忆长度（基准 k=1，即只记上一期所有玩家的
-价格）。状态空间大小 |S| = m^(n*k)，动作空间 |A| = m。
+s_t = {p_{t-1}, ..., p_{t-k}}, where k is the memory length (baseline k=1, i.e.
+only last period's prices for all players are remembered). State space size
+|S| = m^(n*k), action space size |A| = m.
 
-对称双寡头基准：|S| = 15^2 = 225，|A| = 15。每个 agent 的 Q 矩阵是 225 x 15。
+Symmetric duopoly baseline: |S| = 15^2 = 225, |A| = 15. Each agent's Q matrix is
+225 x 15.
 
-## 4. Q-learning（Section I.A 数学定义，Section II 应用到重复博弈）
+## 4. Q-learning (Section I.A general definition, Section II applied to the
+repeated game)
 
-Q 函数定义（式 3）：
+Q-function definition (eq. 3):
 
     Q(s,a) = E[pi | s,a] + delta * E[ max_{a'} Q(s',a') | s,a ]
 
-更新规则（式 4），每期只更新被访问到的 (s_t, a_t) 格子：
+Update rule (eq. 4), updating only the visited (s_t, a_t) cell each period:
 
     Q_{t+1}(s,a) = (1 - alpha) * Q_t(s,a) + alpha * [ pi_t + delta * max_a Q_t(s_{t+1}, a) ]     if s=s_t, a=a_t
     Q_{t+1}(s,a) = Q_t(s,a)                                                                       otherwise
 
-- alpha ∈ [0,1]：学习率，基准网格 [0.025, 0.25]
-- delta：贴现因子，基准 0.95
+- alpha in [0,1]: learning rate, baseline grid [0.025, 0.25]
+- delta: discount factor, baseline 0.95
 
-## 5. 探索策略（Section II.D）
+## 5. Exploration strategy (Section II.D)
 
-epsilon-greedy，探索率随时间指数衰减（式 7）：
+Epsilon-greedy, with the exploration rate decaying exponentially over time
+(eq. 7):
 
     epsilon_t = exp(-beta * t)
 
-beta 越大衰减越快。基准代表性实验点：alpha = 0.15, beta = 4e-6（这是论文正文
-里反复用来出图的"代表性实验"参数，不是网格的中点）。
+Larger beta means faster decay. Baseline "representative experiment" point:
+alpha = 0.15, beta = 4e-6 (this is the parameter combination the paper uses
+repeatedly for its figures starting in Section IV, not the midpoint of the
+grid).
 
-## 6. Q 矩阵初始化（式 8）
+## 6. Q-matrix initialization (eq. 8)
 
-t=0 时，Q_{i,0}(s, a_i) 设为"假设对手均匀随机出价"时 i 选 a_i 的贴现期望利润：
+At t=0, Q_{i,0}(s, a_i) is set to the discounted expected profit from choosing
+a_i "assuming rivals price uniformly at random":
 
     Q_{i,0}(s, a_i) = [ sum_{a_{-i} in A^{n-1}} pi_i(a_i, a_{-i}) ] / [ (1-delta) * |A|^{n-1} ]
 
-初始状态 s_0 在每个 session 开始时随机抽取。
+The initial state s_0 is drawn at random at the start of each session.
 
-## 7. 收敛判据（Section III.B）
+## 7. Convergence criterion (Section III.B)
 
-对每个玩家、每个状态，若最优动作 a_i,t(s) = argmax_a Q_{i,t}(a,s) 连续
-100,000 期不变，则判定收敛。若到 1,000,000,000 期仍未收敛则停止该 session
-（论文用的上限；复现时可以设更低的上限并记录未收敛比例）。
+For each player and each state, convergence is declared once the optimal action
+a_i,t(s) = argmax_a Q_{i,t}(a,s) has stayed unchanged for 100,000 consecutive
+periods. A session is stopped if it still hasn't converged after 1,000,000,000
+periods (the paper's cap; for replication a lower cap can be used, recording
+the non-convergence rate).
 
-Tie-break 规则：并列时选择最低价格（对称博弈下动作集是纯策略，可能在不可行
-的目标价格附近震荡）。
+Tie-break rule: pick the lowest price on ties (under the symmetric game the
+action set is pure strategies, and play can oscillate near an infeasible
+target price).
 
-## 8. 基准参数化（Section II.E，全部来自论文原文）
+## 8. Baseline parameterization (Section II.E, all taken from the paper)
 
-    n = 2（对称双寡头）
+    n = 2 (symmetric duopoly)
     c_i = 1
     a_i - c_i = 1   =>  a_i = 2
     a_0 = 0
@@ -89,125 +105,158 @@ Tie-break 规则：并列时选择最低价格（对称博弈下动作集是纯�
     delta = 0.95
     m = 15
     xi = 0.1
-    k = 1（一期记忆）
+    k = 1 (one-period memory)
 
-验收基准（论文原文数字，写单元测试时用这些数字做 sanity check）：
-- 静态 Bertrand-Nash 均衡下加成（margin）≈ 47%
-- 完全合谋（垄断）下加成 ≈ 上述的两倍，约 94%
+Acceptance benchmarks (numbers from the paper itself; use these as sanity
+checks in unit tests):
+- Price-cost margin at the static Bertrand-Nash equilibrium ≈ 47%
+- Margin under full collusion (monopoly) ≈ twice the above, about 94%
 
-"代表性实验"（论文 Section IV 起大量图表用的那组参数）：
-    alpha = 0.15, beta = 4e-6   （其余同基准）
+"Representative experiment" (the parameter set used for the large batch of
+figures starting in Section IV):
+    alpha = 0.15, beta = 4e-6   (everything else as in the baseline)
 
-## 9. 关键产出指标
+## 9. Key output metric
 
-利润增益（式 9）：
+Profit gain (eq. 9):
 
     Delta = (pi_bar - pi^N) / (pi^M - pi^N)
 
-pi_bar 是收敛后的平均单企业利润，pi^N 是静态 Bertrand-Nash 利润，pi^M 是垄断
-（联合利润最大化）利润。Delta=0 对应完全竞争，Delta=1 对应完全合谋。
+pi_bar is the average per-firm profit after convergence, pi^N is the static
+Bertrand-Nash profit, and pi^M is the monopoly (joint-profit-maximizing)
+profit. Delta=0 corresponds to perfect competition, Delta=1 to perfect
+collusion.
 
-论文报告的关键数字（用来核对复现结果是否在合理范围）：
-- 全网格（100x100 的 alpha,beta）上 Delta 落在 70%-90% 之间（Figure 1）
-- Table 1 "All" 列：平均 Delta = 0.849，Nash 均衡频率 = 0.505，on-path 平均
-  Q-loss = 0.002
-- n=3 时 Delta ≈ 0.75（调整 beta 后），n=4 时 Delta ≈ 0.56（基准 beta 网格下）
-- 不对称成本（Table 4，c_1=1 固定，c_2 从 1 降到 0.25）：Delta 从 0.849 缓慢降
-  到 0.713
+Key numbers reported in the paper (used to check whether replicated results
+are in a reasonable range):
+- Over the full (alpha, beta) grid (100x100), Delta falls between 70%-90%
+  (Figure 1)
+- Table 1 "All" column: mean Delta = 0.849, Nash equilibrium frequency =
+  0.505, average on-path Q-loss = 0.002
+- Delta ≈ 0.75 for n=3 (after adjusting beta), Delta ≈ 0.56 for n=4 (on the
+  baseline beta grid)
+- Asymmetric costs (Table 4, c_1=1 fixed, c_2 lowered from 1 to 0.25): Delta
+  declines slowly from 0.849 to 0.713
 
-## 10. 项目结构与开发约定
+## 10. Project structure and development conventions
 
-    src/environment.py   logit 需求、利润矩阵、Nash/垄断价格数值求解
-    src/qlearning.py     Q 矩阵初始化、更新规则、epsilon-greedy、单 session 跑法
-    src/simulate.py      多 session 驱动、收敛检测、汇总统计
-    configs/*.yaml        参数集（对应论文不同实验设置）
-    experiments/*.py      跑具体实验、输出到 results/
-    tests/                unittest 测试（本环境无法访问 PyPI，不能装 pytest，
-                           一律用标准库 unittest）
-    analysis/              用 matplotlib 复现论文图表
+    src/environment.py   logit demand, profit matrix, numerical Nash/monopoly price solvers
+    src/qlearning.py     Q-matrix initialization, update rule, epsilon-greedy, single-session driver
+    src/simulate.py      multi-session driver, convergence detection, summary statistics
+    configs/*.yaml        parameter sets (corresponding to different experiments in the paper)
+    experiments/*.py      run specific experiments, output to results/
+    tests/                unittest tests (this environment has no PyPI access, can't install
+                           pytest, so everything uses the standard-library unittest)
+    analysis/              matplotlib scripts reproducing the paper's figures
 
-开发顺序：先验证 environment.py 的数值解对得上第 9 节的基准数字，再验证
-qlearning.py 在一个已知解析解的小 MDP 上收敛正确，然后才跑双寡头对局。跑大规
-模网格实验前，先在代表性参数点上用较少 session 数（几十到几百）验证统计量落
-在合理范围，再决定要不要扩大规模。
+Development order: first verify that environment.py's numerical solutions
+match the benchmark numbers in Section 9, then verify that qlearning.py
+converges correctly on a small MDP with a known closed-form solution, and only
+then run the duopoly game. Before running a large-scale grid experiment,
+first validate that the summary statistics fall in a reasonable range at the
+representative parameter point with a small number of sessions (tens to a
+few hundred), and only then decide whether to scale up.
 
-**环境限制**：这个 Claude 会话所在的沙箱无法访问 PyPI（网络策略挋掉了
-pypi.org/files.pythonhosted.org 的请求，返回 403），所以 numba 装不上。热循环
-先用纯 NumPy 写，性能不够时可以考虑：(a) 把多个 session 沿数组维度做 lockstep
-向量化（因为每个 session 结构完全一致，可以把 session 作为 batch 维度整体用
-NumPy 数组操作推进，而不是 Python 循环跑 1000 个独立 session），或 (b) 在有网
-络访问的环境里另装 numba/joblib 做真正的 JIT + 多进程并行。
+**Environment constraint**: the sandbox this Claude session runs in has no
+PyPI access (network policy blocks requests to
+pypi.org/files.pythonhosted.org, returning 403), so numba can't be installed.
+The hot loop is written in plain NumPy first; if performance isn't enough,
+consider: (a) lockstep-vectorizing multiple sessions along an array dimension
+(since every session has identical structure, sessions can be advanced as a
+batch dimension with NumPy array operations instead of a Python loop over
+1000 independent sessions), or (b) installing numba/joblib for real JIT +
+multiprocess parallelism in an environment that does have network access.
 
-## 11. Phase 2 进度记录（2026-09-11）
+## 11. Phase 2 progress notes (2026-09-11)
 
-实测下来，纯 NumPy（无 JIT）实现在这个沙箱里跑到了约 10-11 万期/秒（用了
-`src/simulate.py` 里"每期只查表 + 只检查被更新的那个状态的贪婪动作有没有变"
-这套优化）。沙箱只有 2 个 CPU 核心，用 `joblib.Parallel(n_jobs=2)` 并行跑
-session，单 session 平均约 9-10 秒（含约 170-200 万期才收敛，比论文正文提到
-的"网格中点 alpha=0.125, beta=1e-5 平均 85 万期收敛"要慢，因为代表性实验点的
-beta=4e-6 比网格中点更小，探索衰减更慢）。
+Empirically, the pure-NumPy (no-JIT) implementation reaches about 100-110k
+periods/second in this sandbox (using the "table lookup only + check only
+whether the greedy action of the just-updated state changed" optimization in
+`src/simulate.py`). The sandbox only has 2 CPU cores, so sessions are run in
+parallel with `joblib.Parallel(n_jobs=2)`; a single session takes about 9-10
+seconds on average (needing roughly 1.7-2 million periods to converge, slower
+than the "grid midpoint alpha=0.125, beta=1e-5 converges in about 850k periods
+on average" mentioned in the paper's main text, because the representative
+point's beta=4e-6 is smaller than the grid midpoint, so exploration decays
+more slowly).
 
-`experiments/run_representative.py` 会把结果按 session 追加写到
-`results/representative_experiment.jsonl`（断点续跑：已经跑过的 seed 自动跳
-过），可以分批用不同的 `--start --n_sessions` 调用来跑更多 session。
+`experiments/run_representative.py` appends results to
+`results/representative_experiment.jsonl` session by session (resumable: seeds
+already run are automatically skipped), and can be called in batches with
+different `--start --n_sessions` to run more sessions.
 
-跑了 140 个 session 的结果（对照论文 Table 1"All"列）：
+Results from 140 sessions (compared against the paper's Table 1 "All"
+column):
 
-| 指标 | 复现结果 | 论文 |
+| Metric | Replicated | Paper |
 |---|---|---|
-| 平均 Δ | 0.861 | 0.849 |
-| Δ 标准差 | 0.102 | 0.112 |
-| 收敛比例 | 100% | 接近100% |
-| 极限环长度=1（常数价格）占比 | 66.4% | 64.3% |
-| 极限环长度=2 占比 | 21.4% | 23.8% |
-| 极限环长度≥3 占比 | 12.1% | 11.9% |
+| Mean Δ | 0.861 | 0.849 |
+| Δ std. dev. | 0.102 | 0.112 |
+| Convergence rate | 100% | close to 100% |
+| Share with cycle length = 1 (constant price) | 66.4% | 64.3% |
+| Share with cycle length = 2 | 21.4% | 23.8% |
+| Share with cycle length ≥ 3 | 12.1% | 11.9% |
 
-注意论文 Table 1 的"All"列是整个 100×100 网格的汇总，我们这里只是单一参数点
-（代表性实验点），两者能对得这么近某种程度上比较幸运，不代表网格上每一点都
-会这么吻合——后续如果要做 Figure 1/2 那种网格热力图，还是得真的把网格扫一遍
-才能验证清楚。
+Note that the paper's Table 1 "All" column aggregates the entire 100×100
+grid, whereas we only ran a single parameter point (the representative
+experiment); the two numbers matching this closely is partly luck and
+doesn't mean every point on the grid would match this well — reproducing
+the Figure 1/2 style grid heatmap will require actually sweeping the grid to
+verify this properly.
 
-`src/simulate.py` 的 `run_session()` 支持 `record_every` 参数记录训练过程中的
-窗口平均利润轨迹，用来画类似论文 Figure 10 的学习曲线（见
-`analysis/plot_representative.py`）。
+`src/simulate.py`'s `run_session()` supports a `record_every` argument that
+records a windowed average-profit trace during training, used to plot a
+learning curve similar to the paper's Figure 10 (see
+`analysis/plot_representative.py`).
 
-## 12. Phase 3 进度记录（2026-09-11）：合谋解剖 / 偏离-惩罚分析
+## 12. Phase 3 progress notes (2026-09-11): anatomy of collusion / deviation-punishment analysis
 
-`src/anatomy.py` 实现了论文第四节的核心操作：给定收敛后的极限策略（固定、
-不再探索），在极限环的某个状态 s0 外生强制一方玩家在 τ=1 打静态最优反应
-（对对手当期价格的最优反应，不是随便降价），τ=2 起双方恢复正常策略。因为
-固定策略后系统是确定性有限自动机，价格路径最终一定进入某个循环（鸽笼原
-理），所以贴现利润是精确算的（瞬态段 + 循环段解析求和），不是截断近似。
+`src/anatomy.py` implements the core operation from Section IV of the paper:
+given a converged limit policy (fixed, no longer exploring), exogenously force
+one player to play the static best response at some state s0 on the limit
+cycle at τ=1 (the best response to the rival's current price, not an
+arbitrary price cut), and let both players resume their normal policies from
+τ=2 onward. Because the system becomes a deterministic finite automaton once
+the policy is fixed, the price path is guaranteed to eventually enter some
+cycle (pigeonhole principle), so discounted profits are computed exactly
+(transient segment + analytic sum over the cyclic segment), not approximated
+by truncation.
 
-`experiments/run_anatomy.py` 训练 30 个 session（seed 0-29，和 Phase 2 用同一
-套 alpha/beta，但这次保留了 `SessionResult.policy` 以复用），对每个 session
-收敛后的极限环上每个状态、两种偏离方身份都做一次偏离分析，session 内先对
-"循环起点 x 偏离方身份"取平均（对应论文脚注："算作这个 session 的一个观
-测"），再跨 session 平均。
+`experiments/run_anatomy.py` trains 30 sessions (seeds 0-29, same alpha/beta
+as Phase 2, but this time keeps `SessionResult.policy` for reuse), and for
+each session runs a deviation analysis at every state on the converged limit
+cycle and for both deviator identities. Within a session, results are first
+averaged over "cycle starting point x deviator identity" (matching the paper's
+footnote: "counted as one observation for this session"), then averaged
+across sessions.
 
-结果（对照论文 Table 3 / 正文）：
+Results (compared against the paper's Table 3 / main text):
 
-| 指标 | 复现结果 | 论文 |
+| Metric | Replicated | Paper |
 |---|---|---|
-| 偏离的平均贴现利润变化 | -2.82% | 约 -3% 到 -4% |
-| 偏离不划算的比例 | 98.9% | >95% |
+| Mean discounted-profit change from deviating | -2.82% | about -3% to -4% |
+| Share of deviations that are unprofitable | 98.9% | >95% |
 
-`analysis/plot_anatomy.py` 画出的脉冲响应图（`results/anatomy_impulse_response.png`）
-和论文 Figure 4 的形状高度吻合：τ=1 价格骤降，τ=2 触底（还略低于 τ=1 的水
-平，即论文说的"overshooting"），随后逐步回升，约 τ=9-10 期回到长期价格附
-近——这正是论文强调的"有限期价格战 + 逐步回归"的 stick-and-carrot 模式，
-而不是永久惩罚的 grim-trigger。
+The impulse-response plot from `analysis/plot_anatomy.py`
+(`results/anatomy_impulse_response.png`) closely matches the shape of the
+paper's Figure 4: price drops sharply at τ=1, bottoms out at τ=2 (slightly
+below the τ=1 level — the "overshooting" the paper describes), then gradually
+recovers, returning to near the long-run price by about τ=9-10 — exactly the
+"finite price war + gradual return" stick-and-carrot pattern the paper
+emphasizes, rather than a permanent grim-trigger punishment.
 
-## 13. Phase 4 进度记录（2026-09-11）：稳健性子集——不对称成本 + n=3/4
+## 13. Phase 4 progress notes (2026-09-11): robustness subset — asymmetric costs + n=3/4
 
-**不对称成本（对应论文 Table 4）**：`experiments/run_asymmetric.py`，c1=1 固定，
-c2 ∈ {1.0, 0.875, 0.75, 0.625, 0.5, 0.25}，**关键是 a1=a2=2 保持不变，只有成本
-不对称**（第一版代码错误地让 a_2 = c2+1 去维持 a-c=1，这样整个博弈其实只是
-基准情形的价格水平平移，2 号企业的市场份额恒为 0.5——这本身就是个很好的自检
-信号：不对称变量如果没有影响任何结果，说明建模哪里错了）。每个 c2 点跑了 15
-个 session：
+**Asymmetric costs (matching the paper's Table 4)**: `experiments/run_asymmetric.py`,
+c1=1 fixed, c2 in {1.0, 0.875, 0.75, 0.625, 0.5, 0.25}, **crucially with
+a1=a2=2 held constant so only costs are asymmetric** (the first version of the
+code incorrectly kept a_2 = c2+1 to preserve a-c=1, which made the whole game
+mathematically equivalent to a level shift of the baseline's prices, leaving
+firm 2's market share stuck at exactly 0.5 — this itself turned out to be a
+good self-check: if an asymmetry variable has no effect on any outcome, the
+model is wrong somewhere). Each c2 point was run with 15 sessions:
 
-| c2 | 2's Nash 市场份额（复现/论文） | Δ（复现） | Δ（论文） |
+| c2 | Firm 2's Nash market share (replicated/paper) | Δ (replicated) | Δ (paper) |
 |---|---|---|---|
 | 1.000 | 0.500 / 0.500 | 0.866 | 0.849 |
 | 0.875 | 0.545 / 0.545 | 0.781 | 0.841 |
@@ -216,73 +265,97 @@ c2 ∈ {1.0, 0.875, 0.75, 0.625, 0.5, 0.25}，**关键是 a1=a2=2 保持不变�
 | 0.500 | 0.662 / 0.662 | 0.750 | 0.759 |
 | 0.250 | 0.722 / 0.722 | 0.682 | 0.713 |
 
-市场份额是解析解，和论文数字精确重合到小数点后三位（这部分不依赖 Q-learning
-训练，纯粹是 Bertrand-Nash 均衡的性质，验证了 environment.py 非对称求解器是
-对的）。Δ 随不对称程度增大而下降的趋势和论文一致，量级上也接近，样本量小
-（15 session vs 论文 1000）导致有噪声但没有系统性偏差。图见
-`results/asymmetric_experiment.png`。
+Market shares are the analytic solution and match the paper's numbers exactly
+to three decimal places (this part doesn't depend on Q-learning training at
+all — it's purely a property of the Bertrand-Nash equilibrium, and it
+verifies that environment.py's asymmetric solver is correct). The downward
+trend of Δ with increasing asymmetry matches the paper, and the magnitudes
+are close; the small sample size (15 sessions vs. the paper's 1000) adds
+noise but no systematic bias. Plot: `results/asymmetric_experiment.png`.
 
-**企业数量（对应论文 Section V.A）**：`experiments/run_n_players.py`，仍用代
-表性 alpha=0.15, beta=4e-6（论文原话是"稳健性分析全程沿用这组值"）。n=3 状态
-空间是 n=2 的 15 倍（3375 vs 225），收敛所需期数从约 200 万涨到约 300 万；n=4
-状态空间又涨了 15 倍（50625），收敛期数涨到约 1000 万+，单 session 训练时间
-从 n=2 的约 10 秒涨到 n=4 的约 150-175 秒。跑了 n=3 的 20 个 session、n=4 的 8
-个 session（n=4 样本小是纯粹的时间预算限制，不是收敛失败——8 个全部收敛）：
+**Number of firms (matching the paper's Section V.A)**: `experiments/run_n_players.py`,
+still using the representative alpha=0.15, beta=4e-6 (the paper states that
+"the robustness analysis uses this same set of values throughout"). n=3's
+state space is 15x n=2's (3375 vs. 225), and periods needed to converge rise
+from about 2 million to about 3 million; n=4's state space is another 15x
+larger (50625), and periods needed to converge rise to over 10 million, with
+single-session training time going from about 10 seconds at n=2 to about
+150-175 seconds at n=4. Ran 20 sessions for n=3 and 8 sessions for n=4 (the
+small n=4 sample is purely a time-budget constraint, not a convergence
+failure — all 8 converged):
 
-| n | Δ（复现，session 数） | Δ（论文正文） |
+| n | Δ (replicated, # sessions) | Δ (paper's main text) |
 |---|---|---|
-| 2 | 0.861（140） | 0.849 |
-| 3 | 0.629（20） | 0.64 |
-| 4 | 0.567（8） | 0.56 |
+| 2 | 0.861 (140) | 0.849 |
+| 3 | 0.629 (20) | 0.64 |
+| 4 | 0.567 (8) | 0.56 |
 
-三个点几乎完全落在论文数字上，图见 `results/n_players_comparison.png`。
+All three points fall almost exactly on the paper's numbers; plot:
+`results/n_players_comparison.png`.
 
-**当前还没做的**：更大规模的网格热力图（见下面 Phase 5，目前只跑了 20×20，
-论文原始规模是 100×100）；随机需求冲击、进入退出等其他稳健性检验（论文
-Section V.C-D，尚未实现）；`anatomy.py` 目前的静态最优反应查找硬编码成 n=2，
-还没泛化到 n=3/4（如果要对 n=3/4 也做偏离分析，需要先做这个泛化）。
+**Not yet done**: a larger-scale grid heatmap (see Phase 5 below — only a
+20×20 grid has been run so far, versus the paper's original 100×100 scale);
+other robustness checks such as demand shocks and entry/exit (paper Section
+V.C-D, not yet implemented); `anatomy.py`'s static-best-response lookup is
+currently hardcoded for n=2 and hasn't been generalized to n=3/4 (this
+generalization would need to happen first if deviation analysis is wanted for
+n=3/4 as well).
 
-## 14. Phase 5 进度记录（2026-09-11）：迁移到 UNC Longleaf 集群 + 网格扫描
+## 14. Phase 5 progress notes (2026-09-11): migrating to the UNC Longleaf cluster + grid sweep
 
-本地沙箱只有 2 个 CPU、装不了 numba，Figure 1/2 那种 100×100 网格热力图（一
-共需要 100×100×若干 session 次独立训练）算力上跑不动，这个 Phase 把项目迁移
-到了 UNC Research Computing 的 Longleaf 集群（RHEL 9，SLURM 调度，`general`
-分区单节点 24+ 核）。迁移方式：GitHub 作为唯一事实来源（先 push 到
-`github.com/Maestro-Titarenko/QLearning-Collusion`，Longleaf 上 `git clone`），
-不是手动传文件。环境用 `python/3.12.4` module + venv（`requirements.txt`：
-numpy/scipy/joblib/matplotlib），SSH 用专用 ed25519 key（`~/.ssh/id_ed25519_longleaf`）
-配 `ssh-copy-id` 做免密登录，方便 VS Code Remote-SSH 和自动化脚本直接用。
+The local sandbox only has 2 CPUs and can't install numba, so the Figure 1/2
+style 100×100 grid heatmap (which needs 100×100×several independent training
+runs) is computationally infeasible there. This phase migrated the project to
+UNC Research Computing's Longleaf cluster (RHEL 9, SLURM scheduler, `general`
+partition nodes with 24+ cores each). Migration approach: GitHub as the single
+source of truth (push to
+`github.com/Maestro-Titarenko/QLearning-Collusion` first, then `git clone` on
+Longleaf) rather than manually copying files. The environment uses the
+`python/3.12.4` module plus a venv (`requirements.txt`:
+numpy/scipy/joblib/matplotlib); SSH uses a dedicated ed25519 key
+(`~/.ssh/id_ed25519_longleaf`) set up with `ssh-copy-id` for passwordless
+login, so VS Code Remote-SSH and automation scripts can connect directly.
 
-新增 `experiments/run_grid.py` + `slurm/run_grid.slurm`：按 SLURM job array 切
-分，**每个 array task 固定一个 alpha 值**，task 内部用 joblib 把
-`--cpus-per-task` 指定的核心数用满，跑完这个 alpha 下所有 beta × session 组
-合。断点续跑粒度是 (alpha_idx, beta_idx, seed) 三元组，写到
-`results/grid/alpha_{idx:03d}.jsonl`，任务被杀/超时后重新 sbatch 同样的
-`--array` 会自动跳过已完成的组合。`analysis/plot_grid.py` 把这些文件聚合成
-Figure 1 风格的热力图（单色序列色阶，浅→深蓝对应 Δ 从 0 到 1）。
+Added `experiments/run_grid.py` + `slurm/run_grid.slurm`: work is split by
+SLURM job array, with **each array task handling one fixed alpha value**; within
+a task, joblib uses however many cores `--cpus-per-task` requests to run all
+beta × session combinations for that alpha. The resumability granularity is
+the (alpha_idx, beta_idx, seed) triple, written to
+`results/grid/alpha_{idx:03d}.jsonl`; if a task is killed or times out,
+resubmitting the same `--array` automatically skips combinations that are
+already done. `analysis/plot_grid.py` aggregates these files into a Figure
+1-style heatmap (single-hue sequential color scale, light-to-dark blue for Δ
+from 0 to 1).
 
-**beta 网格范围是一个待核实的假设**：CLAUDE.md 里没有记录论文原文的 beta 网
-格端点，这次用的 `[1e-6, 2e-5]`（对数等距）是根据两个已知锚点——"网格中点
-alpha=0.125, beta=1e-5"（第 11 节）和代表性实验点 beta=4e-6——反推的合理区
-间，不是论文原文抄的数字，后续要跟论文核实。
+**The beta grid range is an assumption that still needs verifying**:
+CLAUDE.md didn't record the paper's exact beta grid endpoints, so the
+`[1e-6, 2e-5]` range used here (log-spaced) was back-derived from two known
+anchor points — "grid midpoint alpha=0.125, beta=1e-5" (Section 11) and the
+representative-experiment point beta=4e-6 — as a reasonable range, not a
+number taken directly from the paper. This should be checked against the
+paper later.
 
-第一次正式跑用了 20×20 网格（alpha 20 档、beta 20 档）、每格点 20 session，
-共 8000 个 session，`max_periods` 设成 200 万（比论文原文的 10 亿低很多，换
-时间可控）。20 个 array task 全部 `COMPLETED`，单个 task 实际只用了 6-11 分
-钟（远低于申请的 6 小时上限）：
+The first real run used a 20×20 grid (20 alpha values, 20 beta values), 20
+sessions per cell, 8000 sessions total, with `max_periods` set to 2 million
+(much lower than the paper's 1 billion, trading accuracy for a manageable
+wall-clock budget). All 20 array tasks `COMPLETED`, and each task actually
+took only 6-11 minutes (well under the requested 6-hour cap):
 
-| 指标 | 结果 |
+| Metric | Result |
 |---|---|
-| 完成格点数 | 269 / 400 |
-| 已完成格点平均 Δ | 0.822（论文 Table 1 "All" 列：0.849） |
-| 落在论文 Figure 1 报告的 [0.70, 0.90] 区间的比例 | 96.3% |
+| Cells completed | 269 / 400 |
+| Mean Δ over completed cells | 0.822 (paper's Table 1 "All" column: 0.849) |
+| Share falling in the paper's reported Figure 1 range of [0.70, 0.90] | 96.3% |
 
-131 个空格点集中在 beta 较小（探索衰减慢）的那一列——这些点上所有 session
-都没能在 200 万期内收敛，是 `max_periods` 设得偏紧的直接后果，不是算法有问
-题。热力图见 `results/grid_heatmap.png`，形状（beta 越大、alpha 适中的区域 Δ
-越高）和论文 Figure 1 定性一致。
+The 131 empty cells are concentrated in the low-beta column (slow exploration
+decay) — none of the sessions at these points converged within 2 million
+periods, a direct consequence of `max_periods` being set too tight, not an
+algorithm problem. Plot: `results/grid_heatmap.png`; its shape (higher Δ where
+beta is larger and alpha is moderate) is qualitatively consistent with the
+paper's Figure 1.
 
-**接下来如果要扩大规模**：把 `slurm/run_grid.slurm` 里的 `N_ALPHA`/`N_BETA`/
-`N_SESSIONS` 改大、`sbatch --array` 上限同步改成 `N_ALPHA-1`；beta 较小那一
-列要收敛完整，`--max_periods` 需要显著调大（可能要接近论文原文的量级），单
-个 task 的 `--time` 上限也要相应放宽。
+**To scale this up further**: increase `N_ALPHA`/`N_BETA`/`N_SESSIONS` in
+`slurm/run_grid.slurm` and update the `sbatch --array` upper bound to match
+`N_ALPHA-1`; for the low-beta column to converge fully, `--max_periods` would
+need to be increased substantially (likely close to the paper's own scale),
+and each task's `--time` cap would need to be relaxed accordingly.

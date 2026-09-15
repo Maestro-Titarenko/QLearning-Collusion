@@ -1,10 +1,12 @@
 """
-论文第四节"合谋解剖"的复现：训练一批 session，对每个 session 收敛后的极限环
-上每一个状态、两种偏离方身份，做外生偏离的脉冲响应分析，然后按论文的口径
-聚合（session 内先对"循环上的各个起点"取平均，算作这个 session 的一个观测，
-再对 session 取平均）。
+Reproduces the paper's Section IV "anatomy of collusion": trains a batch of
+sessions, and for each session's converged limit cycle, runs the exogenous
+deviation impulse-response analysis at every state and for both deviator
+identities, then aggregates the way the paper does (first averaging over
+"each starting point on the cycle" within a session to get one observation
+for that session, then averaging across sessions).
 
-用法：
+Usage:
     python3 experiments/run_anatomy.py --n_sessions 30 --seed_start 0
 """
 from __future__ import annotations
@@ -42,8 +44,9 @@ def _train_and_analyze(seed: int, params, pmat_full, pmat_flat, piN, piM, stride
     if not session.converged:
         return None
 
-    # session 内，对循环上的每个起点 x 两种偏离方身份取平均，算这个 session
-    # 的一个观测（跟论文脚注 29 的处理方式一致）
+    # Within a session, average over each starting point on the cycle x both
+    # deviator identities to get one observation for this session (matching
+    # the paper's footnote 29 treatment)
     deviator_paths = []
     nondeviator_paths = []
     pct_gains = []
@@ -92,13 +95,13 @@ def main() -> None:
     strides = _encode_strides(params.n, params.m)
 
     seeds = list(range(args.seed_start, args.seed_start + args.n_sessions))
-    print(f"训练并分析 {len(seeds)} 个 session（偏离/脉冲响应分析），seed={seeds[0]}..{seeds[-1]}")
+    print(f"Training and analyzing {len(seeds)} session(s) (deviation/impulse-response analysis), seed={seeds[0]}..{seeds[-1]}")
     t0 = time.time()
     results = Parallel(n_jobs=args.n_jobs)(
         delayed(_train_and_analyze)(seed, params, pmat_full, pmat_flat, piN, piM, strides) for seed in seeds
     )
     results = [r for r in results if r is not None]
-    print(f"完成，耗时 {time.time()-t0:.1f}s，{len(results)}/{len(seeds)} 个 session 收敛")
+    print(f"Done, elapsed {time.time()-t0:.1f}s, {len(results)}/{len(seeds)} session(s) converged")
 
     payload = {
         "alpha": ALPHA, "beta": BETA, "horizon": HORIZON,
@@ -109,12 +112,12 @@ def main() -> None:
     os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
     with open(RESULTS_PATH, "w") as f:
         json.dump(payload, f)
-    print(f"结果写入 {RESULTS_PATH}")
+    print(f"Results written to {RESULTS_PATH}")
 
     all_pct_gains = np.array([g for r in results for g in r["pct_gains"]])
     all_profitable = np.array([g for r in results for g in r["profitable_flags"]])
-    print(f"\n偏离的平均贴现利润变化: {all_pct_gains.mean()*100:.2f}% (论文 Table 3 大约 -3% 到 -4%)")
-    print(f"偏离不划算（unprofitable）的比例: {(~all_profitable).mean()*100:.1f}% (论文: >95%)")
+    print(f"\nMean discounted-profit change from deviating: {all_pct_gains.mean()*100:.2f}% (paper's Table 3: about -3% to -4%)")
+    print(f"Share of deviations that are unprofitable: {(~all_profitable).mean()*100:.1f}% (paper: >95%)")
 
 
 if __name__ == "__main__":

@@ -1,20 +1,24 @@
 #!/bin/bash
-# 复现论文 Figure 1/2 的 (alpha, beta) 网格扫描（CLAUDE.md 第 13 节标注的
-# Phase 5，之前因为本地沙箱算力不够一直没做）。
+# (alpha, beta) grid sweep reproducing the paper's Figure 1/2 (CLAUDE.md
+# Section 13's "Phase 5," which had been on hold because the local sandbox
+# didn't have enough compute).
 #
-# 一个 array task 负责一个 alpha 值，跑完这个 alpha 下 n_beta * n_sessions 个
-# session，task 内部用 joblib 把 --cpus-per-task 指定的核心数用满。
+# One array task handles one alpha value, running n_beta * n_sessions
+# sessions for that alpha; within a task, joblib uses however many cores
+# --cpus-per-task requests.
 #
-# 用法：
+# Usage:
 #   cd ~/qlearning-collusion
 #   mkdir -p slurm_logs
-#   sbatch --array=0-19 slurm/run_grid.slurm          # 20x20 网格，每点 20 session
+#   sbatch --array=0-19 slurm/run_grid.slurm          # 20x20 grid, 20 sessions per cell
 #
-# 断点续跑：某个 array task 没跑完/超时被杀，重新 sbatch 同样的 --array 会跳过
-# 已经写进 results/grid/alpha_XXX.jsonl 的 (beta_idx, seed) 组合。
+# Resumable: if an array task doesn't finish (killed on timeout),
+# resubmitting the same --array skips (beta_idx, seed) combinations already
+# written to results/grid/alpha_XXX.jsonl.
 #
-# 调整网格规模：把下面 N_ALPHA/N_BETA/N_SESSIONS 改掉，同时把 sbatch 的
-# --array 上限改成 N_ALPHA-1（两处必须一致，array task 数量 = N_ALPHA）。
+# To change the grid size: edit N_ALPHA/N_BETA/N_SESSIONS below, and update
+# sbatch's --array upper bound to N_ALPHA-1 to match (the two must stay
+# consistent — the number of array tasks = N_ALPHA).
 
 #SBATCH --job-name=qcollusion-grid
 #SBATCH --partition=general

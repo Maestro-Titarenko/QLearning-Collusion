@@ -1,25 +1,32 @@
 """
-经济环境：logit 需求、利润、静态 Bertrand-Nash / 垄断价格求解、动作空间离散化。
+Economic environment: logit demand, profits, static Bertrand-Nash / monopoly
+price solvers, action-space discretization.
 
-对应 Calvano et al. (2020) Section II.A-II.E。方程编号见 CLAUDE.md 第 1-2 节。
+Corresponds to Calvano et al. (2020) Section II.A-II.E. Equation numbers match
+CLAUDE.md Sections 1-2.
 
-FOC 推导（供代码审阅时核对，推导过程见项目笔记，此处只给结论）：
+FOC derivation (for code review reference; the derivation itself lives in the
+project notes, only the conclusions are given here):
 
     q_i(p) = exp((a_i - p_i)/mu) / [ sum_j exp((a_j - p_j)/mu) + exp(a0/mu) ]
 
     dq_i/dp_i = -(1/mu) * q_i * (1 - q_i)
     dq_j/dp_i = (1/mu) * q_i * q_j        (j != i)
 
-    Bertrand-Nash（每个企业只控制自己的价格）一阶条件：
+    Bertrand-Nash (each firm controls only its own price) first-order condition:
         FOC_i = q_i - (1/mu) * q_i * (1-q_i) * (p_i - c_i) = 0
 
-    垄断 / 联合利润最大化（假想的多产品垄断者同时控制所有价格）一阶条件，化简后：
+    Monopoly / joint profit maximization (a hypothetical multi-product
+    monopolist controlling all prices simultaneously), first-order condition
+    after simplification:
         FOC_i = q_i * (1 + (S - (p_i - c_i)) / mu) = 0,   S = sum_j (p_j - c_j) * q_j
 
-    对称情形（n 个产品完全对称）退化为标量方程：
+    In the symmetric case (n identical products) these reduce to scalar
+    equations:
         Nash:     p - c = mu / (1 - q(p))
         Monopoly: p - c = mu / (1 - n * q(p))
-    这两个标量方程用来做独立于 fsolve 的交叉验证（见 tests/test_environment.py）。
+    These two scalar equations are used as a cross-check independent of
+    fsolve (see tests/test_environment.py).
 """
 from __future__ import annotations
 
@@ -31,7 +38,8 @@ from scipy.optimize import brentq, minimize
 
 @dataclass
 class EconParams:
-    """一组经济环境参数。默认值为论文 baseline（Section II.E）。"""
+    """A set of economic environment parameters. Defaults are the paper's
+    baseline (Section II.E)."""
 
     n: int = 2
     c: np.ndarray = field(default_factory=lambda: np.array([1.0, 1.0]))
@@ -47,7 +55,7 @@ class EconParams:
         self.c = np.asarray(self.c, dtype=float)
         self.a = np.asarray(self.a, dtype=float)
         if self.c.shape != (self.n,) or self.a.shape != (self.n,):
-            raise ValueError("c, a 的长度必须等于 n")
+            raise ValueError("c and a must have length n")
 
     @property
     def is_symmetric(self) -> bool:
@@ -55,16 +63,19 @@ class EconParams:
 
     @classmethod
     def baseline(cls, n: int = 2) -> "EconParams":
-        """论文 Section II.E 的对称双寡头基准（n=2 时与论文完全一致；
-        n>2 时按同样的 a_i-c_i=1 对称扩展，用于 Section V.A 的稳健性练习）。"""
+        """The paper's Section II.E symmetric duopoly baseline (matches the
+        paper exactly at n=2; for n>2 it extends symmetrically with the same
+        a_i-c_i=1, used for the Section V.A robustness exercise)."""
         return cls(n=n, c=np.ones(n), a=np.full(n, 2.0), a0=0.0, mu=0.25, delta=0.95, m=15, xi=0.1, k=1)
 
 
 def demand(prices: np.ndarray, a: np.ndarray, a0: float, mu: float) -> np.ndarray:
-    """向量化 logit 需求。prices, a 的最后一维是产品维度 n，可以带任意 batch 维。
+    """Vectorized logit demand. The last axis of prices/a is the product
+    dimension n; any leading batch dimensions are allowed.
 
-    用把外部选择当作第 n+1 个"产品"、整体做数值稳定 softmax 的方式实现，
-    避免 exp() 溢出。
+    Implemented by treating the outside good as an (n+1)-th "product" and
+    doing a numerically stable softmax over all of them, to avoid exp()
+    overflow.
     """
     prices = np.asarray(prices, dtype=float)
     a = np.broadcast_to(a, prices.shape)
@@ -101,7 +112,8 @@ def _symmetric_q(p: float, c0: float, a0_val: float, a_out: float, mu: float, n:
 
 
 def _solve_symmetric(params: EconParams, monopoly: bool) -> float:
-    """对称情形下的标量求解，用作 fsolve 的独立交叉验证（不是主路径）。"""
+    """Scalar solver for the symmetric case, used as an independent
+    cross-check for fsolve (not the main code path)."""
     c0, a0_val = params.c[0], params.a[0]
     n = params.n
 
@@ -111,19 +123,22 @@ def _solve_symmetric(params: EconParams, monopoly: bool) -> float:
         return (p - c0) - params.mu / denom
 
     lo, hi = c0 + 1e-6, c0 + 200.0
-    # 扫描找一个变号区间再用 brentq，避免手动猜括号
+    # Scan for a sign-change interval first, then use brentq — avoids
+    # manually guessing a bracket.
     grid = np.linspace(lo, hi, 20000)
     vals = np.array([residual(p) for p in grid])
     sign_changes = np.where(np.diff(np.sign(vals)) != 0)[0]
     if len(sign_changes) == 0:
-        raise RuntimeError("未找到变号区间，检查参数是否合理")
+        raise RuntimeError("No sign-change interval found; check whether the parameters are reasonable")
     idx = sign_changes[0]
     return brentq(residual, grid[idx], grid[idx + 1])
 
 
 def _best_response(p_other: np.ndarray, i: int, params: EconParams) -> float:
-    """给定对手价格，玩家 i 的静态最优反应（一维数值优化，不依赖 FOC 方程组，
-    不会像联立方程求解那样被引到虚假驻点）。"""
+    """Player i's static best response given rivals' prices (1-D numerical
+    optimization; doesn't rely on the FOC system, so it can't be led astray
+    to a spurious stationary point the way solving the simultaneous
+    equations can)."""
     def neg_profit(pi: np.ndarray) -> float:
         prices = p_other.copy()
         prices[i] = pi[0]
@@ -134,12 +149,18 @@ def _best_response(p_other: np.ndarray, i: int, params: EconParams) -> float:
 
 
 def _tatonnement_nash(params: EconParams, tol: float = 1e-10, max_iter: int = 2000) -> np.ndarray:
-    """最优反应动态（Gauss-Seidel 式轮流最优反应）收敛到 Nash 均衡。这是求解
-    一般化（含非对称）logit Bertrand-Nash 的主路径：比直接解一阶条件联立方程组
-    稳健得多——FOC 方程组在这个问题里可能有多个驻点（例如价格发散到很大时残差
-    也趋近于 0），least_squares/fsolve 容易被带到那些不是真正均衡的解上，这一点
-    在开发时用一个成本不对称的例子实测踩到过坑（残差看似很小，但价格是
-    [6.9, 1.7] 这种明显不合理的解；改用最优反应迭代后核对为 [1.40, 1.30]）。
+    """Best-response dynamics (Gauss-Seidel-style alternating best responses)
+    converging to the Nash equilibrium. This is the main code path for
+    solving the (possibly asymmetric) logit Bertrand-Nash equilibrium: it is
+    far more robust than solving the first-order-condition system directly —
+    that FOC system can have multiple stationary points for this problem
+    (e.g. the residual can also approach 0 as prices diverge to very large
+    values), and least_squares/fsolve are prone to being pulled toward one of
+    those non-equilibrium solutions. This was hit in practice during
+    development on a cost-asymmetric example (the residual looked tiny, but
+    the solution was an obviously unreasonable price vector like [6.9, 1.7];
+    switching to best-response iteration gave the correct [1.40, 1.30]
+    instead).
     """
     prices = params.c + 1.0
     for _ in range(max_iter):
@@ -149,12 +170,14 @@ def _tatonnement_nash(params: EconParams, tol: float = 1e-10, max_iter: int = 20
         if np.max(np.abs(new_prices - prices)) < tol:
             return new_prices
         prices = new_prices
-    raise RuntimeError("最优反应迭代未在 max_iter 内收敛")
+    raise RuntimeError("Best-response iteration did not converge within max_iter")
 
 
 def solve_nash(params: EconParams) -> np.ndarray:
-    """静态 Bertrand-Nash 价格向量 p^N。对称情形用标量 brentq（最快最稳健）；
-    非对称情形用最优反应迭代（tâtonnement），见 `_tatonnement_nash` 的说明。
+    """Static Bertrand-Nash price vector p^N. Uses the scalar brentq solver
+    in the symmetric case (fastest and most robust); uses best-response
+    iteration (tâtonnement) in the asymmetric case — see `_tatonnement_nash`
+    for why.
     """
     if params.is_symmetric:
         p_star = _solve_symmetric(params, monopoly=False)
@@ -163,9 +186,13 @@ def solve_nash(params: EconParams) -> np.ndarray:
 
 
 def solve_monopoly(params: EconParams, x0: np.ndarray | None = None) -> np.ndarray:
-    """联合利润最大化价格向量 p^M。对称情形用标量 brentq。非对称情形改用有界
-    数值优化直接最大化联合利润（比解 FOC 方程组更稳健——FOC 在价格趋于无穷时
-    也可能"满足"到数值精度内，fsolve 容易被带偏，见开发时的踩坑记录）。
+    """Joint-profit-maximizing price vector p^M. Uses the scalar brentq
+    solver in the symmetric case. In the asymmetric case, uses bounded
+    numerical optimization to directly maximize joint profit (more robust
+    than solving the FOC system — the FOC can also be "satisfied" to within
+    numerical precision as prices diverge to infinity, which can mislead
+    fsolve; see the tâtonnement docstring above for the same issue in a
+    related context).
     """
     if params.is_symmetric:
         p_star = _solve_symmetric(params, monopoly=True)
@@ -179,15 +206,17 @@ def solve_monopoly(params: EconParams, x0: np.ndarray | None = None) -> np.ndarr
     bounds = [(ci + 1e-6, ci + 50.0) for ci in params.c]
     res = minimize(neg_joint_profit, x0, bounds=bounds, method="L-BFGS-B")
     if not res.success:
-        raise RuntimeError(f"垄断价格求解未收敛：{res.message}")
+        raise RuntimeError(f"Monopoly price solver did not converge: {res.message}")
     return res.x
 
 
 def build_price_grid(params: EconParams, p_nash: np.ndarray, p_monopoly: np.ndarray) -> np.ndarray:
-    """论文 Section II.B 的离散化：每个玩家的可行价格集是
-    [p^N - xi*(p^M-p^N), p^M + xi*(p^M-p^N)] 上的 m 个等距点。
+    """Discretization from the paper's Section II.B: each player's feasible
+    price set is m equally spaced points on
+    [p^N - xi*(p^M-p^N), p^M + xi*(p^M-p^N)].
 
-    返回 shape (n, m) 的数组，第 i 行是玩家 i 的价格网格。对称基准下所有行相同。
+    Returns an array of shape (n, m); row i is player i's price grid. All
+    rows are identical under the symmetric baseline.
     """
     lo = p_nash - params.xi * (p_monopoly - p_nash)
     hi = p_monopoly + params.xi * (p_monopoly - p_nash)
@@ -196,13 +225,15 @@ def build_price_grid(params: EconParams, p_nash: np.ndarray, p_monopoly: np.ndar
 
 
 def build_profit_matrix(params: EconParams, grids: np.ndarray) -> np.ndarray:
-    """预计算所有离散动作组合下的利润，shape = (m,)*n + (n,)。
+    """Precompute profits for every discrete action combination, shape =
+    (m,)*n + (n,).
 
-    这是让模拟快起来的关键：Q-learning 主循环里查表而不是重新算 exp()。
-    对称双寡头基准下这是一个 15x15x2 的小数组。
+    This is the key to making the simulation fast: the Q-learning main loop
+    does a table lookup instead of recomputing exp(). Under the symmetric
+    duopoly baseline this is a small 15x15x2 array.
     """
     n, m = params.n, params.m
-    # meshgrid 生成所有价格组合
+    # meshgrid generates every price combination
     mesh = np.meshgrid(*[grids[i] for i in range(n)], indexing="ij")
     price_combos = np.stack(mesh, axis=-1)  # shape (m,)*n + (n,)
     profit_mat = profits(price_combos, params.c, params.a, params.a0, params.mu)
@@ -210,7 +241,9 @@ def build_profit_matrix(params: EconParams, grids: np.ndarray) -> np.ndarray:
 
 
 def margin(price: float, cost: float) -> float:
-    """论文正文说的"price-cost margin"是 (p-c)/c（相对成本的加成），不是
-    Lerner index (p-c)/p。用基准参数验证过：(p^N-c)/c ≈ 0.473 ≈ 47%，
-    (p^M-c)/c ≈ 0.925，约为前者的两倍，与论文 Section II.E 的描述一致。"""
+    """The "price-cost margin" the paper's text refers to is (p-c)/c (markup
+    relative to cost), not the Lerner index (p-c)/p. Verified against the
+    baseline parameters: (p^N-c)/c ≈ 0.473 ≈ 47%, (p^M-c)/c ≈ 0.925, about
+    twice the former — consistent with the paper's description in Section
+    II.E."""
     return (price - cost) / cost

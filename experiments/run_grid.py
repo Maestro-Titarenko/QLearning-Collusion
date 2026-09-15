@@ -1,22 +1,28 @@
 """
-论文 Figure 1/2 的 (alpha, beta) 网格扫描。CLAUDE.md 第 13 节标注为"Phase 5，
-还没做的部分"——这是那部分的实现，设计成可以按 SLURM job array 切分：每个
-array task 负责固定一个 alpha 值，跑完这个 alpha 下所有 beta 值 x 所有
-session，任务内部用 joblib 把一个计算节点的核心全部用满。
+The (alpha, beta) grid sweep for the paper's Figure 1/2. CLAUDE.md Section 13
+flagged this as "Phase 5, not yet done" — this is that implementation,
+designed to be split by SLURM job array: each array task is responsible for
+one fixed alpha value, running every beta value x every session for that
+alpha, using joblib within the task to fully use a compute node's cores.
 
-alpha 网格范围 [0.025, 0.25] 是 CLAUDE.md 第 4 节写明的论文基准网格范围。beta
-网格范围目前没有 CLAUDE.md 记录的确切论文数字（本仓库之前也没做过这部分），
-这里按 CLAUDE.md 里两个已知锚点——"网格中点 alpha=0.125, beta=1e-5"（第 11
-节）和"代表性实验点 beta=4e-6"（第 5 节）——取了一个对数等距的合理区间
-[1e-6, 2e-5]，中点接近 1e-5。**这是一个待核对的假设，不是从论文原文抄的数
-字**，正式出图前应该找论文原文核实实际网格端点。
+The alpha grid range [0.025, 0.25] is the paper's baseline grid range as
+recorded in CLAUDE.md Section 4. There's currently no exact paper number on
+record in CLAUDE.md for the beta grid range (this repo hadn't done this part
+before), so the log-spaced range [1e-6, 2e-5] used here (midpoint close to
+1e-5) was back-derived from two known anchor points in CLAUDE.md — "grid
+midpoint alpha=0.125, beta=1e-5" (Section 11) and the "representative
+experiment point beta=4e-6" (Section 5). **This is an assumption that still
+needs checking, not a number taken directly from the paper** — the actual
+grid endpoints should be verified against the paper before treating any
+resulting figure as final.
 
-用法（单个 array task，对应一个 alpha 值）：
+Usage (a single array task, corresponding to one alpha value):
     python3 experiments/run_grid.py --alpha_idx 0 --n_alpha 20 --n_beta 20 \
         --n_sessions 20 --max_periods 2000000 --n_jobs 32
 
-断点续跑：每个 (alpha_idx) 对应一个独立输出文件
-results/grid/alpha_{alpha_idx:03d}.jsonl，文件内按 (beta_idx, seed) 去重。
+Resumable: each alpha_idx has its own output file
+results/grid/alpha_{alpha_idx:03d}.jsonl, deduplicated within the file by
+(beta_idx, seed).
 """
 from __future__ import annotations
 
@@ -72,7 +78,7 @@ def _run_one(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--alpha_idx", type=int, required=True, help="这个 task 负责的 alpha 在网格里的下标")
+    parser.add_argument("--alpha_idx", type=int, required=True, help="index into the alpha grid that this task is responsible for")
     parser.add_argument("--n_alpha", type=int, default=20)
     parser.add_argument("--n_beta", type=int, default=20)
     parser.add_argument("--alpha_min", type=float, default=0.025)
@@ -83,7 +89,7 @@ def main() -> None:
     parser.add_argument("--max_periods", type=int, default=2_000_000)
     parser.add_argument("--conv_threshold", type=int, default=100_000)
     parser.add_argument("--n_jobs", type=int, default=4)
-    parser.add_argument("--n", type=int, default=2, help="企业数量，默认对称双寡头")
+    parser.add_argument("--n", type=int, default=2, help="number of firms, defaults to the symmetric duopoly")
     args = parser.parse_args()
 
     alphas = np.linspace(args.alpha_min, args.alpha_max, args.n_alpha)
@@ -117,12 +123,12 @@ def main() -> None:
         if (beta_idx, seed) not in done
     ]
     if not todo:
-        print(f"alpha_idx={args.alpha_idx}（alpha={alpha:.4f}）已经全部跑完，跳过。")
+        print(f"alpha_idx={args.alpha_idx} (alpha={alpha:.4f}) is already fully done, skipping.")
         return
 
     print(
-        f"alpha_idx={args.alpha_idx}（alpha={alpha:.4f}），"
-        f"跑 {len(todo)} 个 (beta, session) 组合，n_jobs={args.n_jobs}"
+        f"alpha_idx={args.alpha_idx} (alpha={alpha:.4f}), "
+        f"running {len(todo)} (beta, session) combination(s), n_jobs={args.n_jobs}"
     )
     t0 = time.time()
     results = Parallel(n_jobs=args.n_jobs)(
@@ -133,12 +139,12 @@ def main() -> None:
         for beta_idx, seed in todo
     )
     elapsed = time.time() - t0
-    print(f"完成，总耗时 {elapsed:.1f}s（平均每个 {elapsed/len(todo):.1f}s）")
+    print(f"Done, total elapsed {elapsed:.1f}s (average {elapsed/len(todo):.1f}s each)")
 
     with open(out_path, "a") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
-    print(f"结果已追加写入 {out_path}")
+    print(f"Results appended to {out_path}")
 
 
 if __name__ == "__main__":

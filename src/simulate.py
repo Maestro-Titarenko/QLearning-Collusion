@@ -1,20 +1,31 @@
 """
-双寡头重复定价博弈的 session 驱动器。对应论文 Section II.E-III.B。
+Session driver for the duopoly repeated pricing game. Corresponds to the
+paper's Section II.E-III.B.
 
-性能说明：这个沙箱装不上 numba，所以这里手写了一版针对"无 JIT"场景优化过的
-纯 NumPy/Python 实现：
-  1. 状态用展平后的整数索引（而不是元组），Q 矩阵 reshape 成 (n, S, m)。
-  2. 利润矩阵预先展平成 (S, n)：因为 k=1 记忆下，"下一期状态"的编码方式和
-     "这一期动作组合"的编码方式是同一套映射，所以 reward 直接就是
-     profit_matrix_flat[next_state]，不需要额外的动作编码步骤。
-  3. 每个 chunk（比如 20 万期）批量预生成随机数（探索与否的判定、随机探索时
-     选哪个动作），而不是每期都调用一次随机数生成器。
-  4. 收敛判据做了等价的效率优化：论文的判据是"每个玩家在每个状态下的最优动作
-     连续 N 期不变"。因为 Q-learning 每期只会更新被访问到的那一个 (state,action)
-     格子，其余格子的 Q 值、进而其余状态的贪婪动作都不可能变化。所以只需要
-     在每期更新后检查"这一期被更新的那个状态，它的贪婪动作有没有变"，如果
-     连续 N 期都没有任何一次这样的变化，就等价于整个策略连续 N 期不变。这比
-     每期重新算一遍完整的 argmax(Q, axis=-1) 快得多。
+Performance note: this sandbox can't install numba, so this is a hand-tuned,
+pure-NumPy/Python implementation optimized for the no-JIT case:
+  1. States are represented as flattened integer indices (rather than
+     tuples), and the Q matrix is reshaped to (n, S, m).
+  2. The profit matrix is pre-flattened to (S, n): because under k=1 memory
+     the encoding used for "next state" and the encoding used for "this
+     period's action combination" are the same mapping, the reward is
+     simply profit_matrix_flat[next_state] with no extra action-encoding
+     step needed.
+  3. Each chunk (e.g. 200,000 periods) pre-generates random numbers in bulk
+     (whether to explore, and which action to pick when exploring at
+     random), instead of calling the random number generator once per
+     period.
+  4. The convergence criterion is optimized to an equivalent but cheaper
+     check. The paper's criterion is "the optimal action is unchanged for N
+     consecutive periods, for every player and every state." Since
+     Q-learning only ever updates the one (state, action) cell that was
+     visited each period, no other cell's Q-value — and hence no other
+     state's greedy action — can possibly change. So it's enough to check,
+     after each update, "did the greedy action of the state that was just
+     updated change this period?" If there's no such change for N
+     consecutive periods, that is equivalent to the whole policy having been
+     unchanged for N consecutive periods. This is much faster than
+     recomputing the full argmax(Q, axis=-1) every period.
 """
 from __future__ import annotations
 
@@ -33,13 +44,15 @@ class SessionResult:
     n_periods: int
     cycle_states: List[int]
     cycle_length: int
-    avg_profit: np.ndarray  # shape (n,)，长期（收敛后）平均单期利润
-    delta: float  # 论文式(9)，用所有玩家的平均利润算
+    avg_profit: np.ndarray  # shape (n,), long-run (post-convergence) average per-period profit
+    delta: float  # eq. (9) from the paper, computed from the average profit across all players
     trace_periods: List[int] = field(default_factory=list)
     trace_avg_profit: List[float] = field(default_factory=list)
-    policy: np.ndarray | None = None  # shape (n, S)，收敛后的极限贪婪策略；
-    # 默认保留（数组很小，n=2 时只有 2x225 个 int），供第四节"合谋解剖"的
-    # 偏离/脉冲响应分析复用，不需要重新训练。写 jsonl 落盘时手动排除这个字段。
+    policy: np.ndarray | None = None  # shape (n, S), the converged greedy limit policy;
+    # kept by default (the array is small — only 2x225 ints at n=2) for reuse
+    # by the Section IV "anatomy of collusion" deviation/impulse-response
+    # analysis, which would otherwise need to retrain. Exclude this field
+    # manually when serializing to jsonl.
 
 
 @dataclass
@@ -63,15 +76,18 @@ class ExperimentResult:
 
 
 def _encode_strides(n: int, m: int) -> np.ndarray:
-    """和 build_profit_matrix() 里 meshgrid(indexing='ij') 的展平顺序对齐：
-    第 0 个玩家的动作是最高位。"""
+    """Aligned with the flattening order of meshgrid(indexing='ij') in
+    build_profit_matrix(): player 0's action is the most significant
+    digit."""
     return m ** np.arange(n - 1, -1, -1)
 
 
 def _extract_steady_state(policy: np.ndarray, profit_matrix_flat: np.ndarray, s_start: int, strides: np.ndarray, max_steps: int) -> tuple[List[int], np.ndarray]:
-    """从给定状态出发，按固定（贪婪）策略确定性地往前推演，直到状态重复出现，
-    从而精确地找出极限环（可能是长度 1 的"常数价格"，也可能是更长的价格循环）。
-    有限状态空间下，max_steps = S+1 就足够保证一定会出现重复（鸽笼原理）。
+    """Starting from a given state, deterministically roll forward under the
+    fixed (greedy) policy until a state repeats, thereby exactly identifying
+    the limit cycle (which may have length 1 — a constant price — or be a
+    longer price cycle). In a finite state space, max_steps = S+1 is always
+    enough to guarantee a repeat occurs (pigeonhole principle).
     """
     visited = {}
     trajectory: List[int] = []
@@ -86,8 +102,9 @@ def _extract_steady_state(policy: np.ndarray, profit_matrix_flat: np.ndarray, s_
         trajectory.append(state)
         actions = policy[:, state]
         state = int(np.dot(actions, strides))
-    # 理论上不会走到这里（有限状态空间一定会在 S+1 步内出现重复）
-    raise RuntimeError("未能在 max_steps 内找到极限环，检查状态空间大小设置是否够大")
+    # Should be unreachable in theory (a finite state space always produces a
+    # repeat within S+1 steps).
+    raise RuntimeError("Failed to find a limit cycle within max_steps; check that the state-space size is set correctly")
 
 
 def run_session(
@@ -103,10 +120,12 @@ def run_session(
     chunk_size: int = 200_000,
     record_every: int | None = None,
 ) -> SessionResult:
-    """record_every 不为 None 时，额外记录训练过程中的窗口平均利润轨迹（写在
-    返回的 SessionResult.trace 里），用来画类似论文 Figure 10 的学习曲线。这
-    个记录本身会有一点开销，所以默认关闭，只在跑单个用于画图的示例 session
-    时打开。"""
+    """When record_every is not None, additionally records a windowed
+    average-profit trace during training (in the returned
+    SessionResult.trace fields), used to plot a learning curve similar to
+    the paper's Figure 10. This recording has a small overhead of its own,
+    so it's off by default and only turned on when running a single example
+    session meant for plotting."""
     n, m = params.n, params.m
     S = m**n
     strides = _encode_strides(n, m)
@@ -194,9 +213,11 @@ def run_experiment(
     conv_threshold: int = 100_000,
     seed: int = 0,
 ) -> ExperimentResult:
-    """跑 n_sessions 个独立 session，返回汇总结果。对应论文 Section II 的
-    "每组参数一个 experiment，每个 experiment 1000 个 session" 设计（这里
-    session 数可配置，方便先用少量 session 做验证）。"""
+    """Run n_sessions independent sessions and return the aggregated result.
+    Corresponds to the paper's design of "one experiment per parameter set,
+    1000 sessions per experiment" (here the number of sessions is
+    configurable, to allow validating with a small number of sessions
+    first)."""
     p_nash = solve_nash(params)
     p_monopoly = solve_monopoly(params)
     grids = build_price_grid(params, p_nash, p_monopoly)

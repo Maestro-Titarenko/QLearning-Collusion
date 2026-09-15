@@ -1,6 +1,7 @@
 """
-复现论文 Section V.A：企业数量越多，Delta 越低。n=2 用 Phase 2 跑的 140 个
-session 代表性实验结果，n=3/4 用本阶段跑的结果。
+Reproduces the paper's Section V.A: more firms means lower Delta. Uses the
+140 sessions from Phase 2's representative-experiment run for n=2, and this
+phase's own runs for n=3/4.
 """
 from __future__ import annotations
 
@@ -9,9 +10,6 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-plt.rcParams["font.sans-serif"] = ["Noto Sans CJK JP", "Noto Sans CJK SC", "DejaVu Sans"]
-plt.rcParams["axes.unicode_minus"] = False
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLUE = "#2a78d6"
@@ -22,7 +20,7 @@ INK_MUTED = "#898781"
 GRID = "#e1e0d9"
 SURFACE = "#fcfcfb"
 
-PAPER_DELTA = {2: 0.849, 3: 0.64, 4: 0.56}  # 论文正文数字（n=3/4 用基准 beta 网格，未专门调低 beta）
+PAPER_DELTA = {2: 0.849, 3: 0.64, 4: 0.56}  # numbers from the paper's main text (n=3/4 use the baseline beta grid, not a beta tuned down specially)
 
 
 def load_deltas(path: str) -> np.ndarray:
@@ -46,11 +44,11 @@ def main() -> None:
 
     width = 0.32
     x = np.arange(len(ns))
-    ax.bar(x - width / 2, means, width=width, yerr=ses, color=BLUE, capsize=4, label="复现")
-    ax.bar(x + width / 2, paper_vals, width=width, color=ORANGE, alpha=0.85, label="论文正文")
+    ax.bar(x - width / 2, means, width=width, yerr=ses, color=BLUE, capsize=4, label="Replicated")
+    ax.bar(x + width / 2, paper_vals, width=width, color=ORANGE, alpha=0.85, label="Paper's main text")
 
     for i, (m, cnt) in enumerate(zip(means, ns_counts)):
-        ax.text(x[i] - width / 2, m + 0.02, f"{m:.2f}\n(n_session={cnt})", ha="center", fontsize=8, color=INK_SECONDARY)
+        ax.text(x[i] - width / 2, m + 0.02, f"{m:.2f}\n(n_sessions={cnt})", ha="center", fontsize=8, color=INK_SECONDARY)
     for i, p in enumerate(paper_vals):
         ax.text(x[i] + width / 2, p + 0.02, f"{p:.2f}", ha="center", fontsize=8, color=INK_SECONDARY)
 
@@ -62,9 +60,9 @@ def main() -> None:
         ax.spines[spine].set_color(GRID)
     ax.tick_params(colors=INK_MUTED, labelsize=9)
     ax.grid(axis="y", color=GRID, linewidth=0.8)
-    ax.set_ylabel("平均利润增益 Δ", color=INK_SECONDARY, fontsize=10)
+    ax.set_ylabel("Mean profit gain Δ", color=INK_SECONDARY, fontsize=10)
     ax.set_ylim(0, 1.0)
-    ax.set_title("企业数量越多，合谋程度越低（但没有消失）", color=INK_PRIMARY, fontsize=11, loc="left")
+    ax.set_title("More firms means less collusion (but it doesn't disappear)", color=INK_PRIMARY, fontsize=11, loc="left")
     legend = ax.legend(frameon=False, fontsize=9, loc="upper right")
     for t in legend.get_texts():
         t.set_color(INK_SECONDARY)
