@@ -288,9 +288,7 @@ failure — all 8 converged):
 All three points fall almost exactly on the paper's numbers; plot:
 `results/n_players_comparison.png`.
 
-**Not yet done**: a larger-scale grid heatmap (see Phase 5 below — only a
-20×20 grid has been run so far, versus the paper's original 100×100 scale);
-other robustness checks such as demand shocks and entry/exit (paper Section
+**Not yet done**: other robustness checks such as demand shocks and entry/exit (paper Section
 V.C-D, not yet implemented); `anatomy.py`'s static-best-response lookup is
 currently hardcoded for n=2 and hasn't been generalized to n=3/4 (this
 generalization would need to happen first if deviation analysis is wanted for
@@ -345,9 +343,10 @@ took only 6-11 minutes (well under the requested 6-hour cap):
 The 131 empty cells are concentrated in the low-beta column (slow exploration
 decay) — none of the sessions at these points converged within 2 million
 periods, a direct consequence of `max_periods` being set too tight, not an
-algorithm problem. Plot: `results/grid_heatmap.png`; its shape (higher Δ where
-beta is larger and alpha is moderate) is qualitatively consistent with the
-paper's Figure 1.
+algorithm problem. Plot: `results/grid_heatmap_20x20_2M.png` (archived; see
+below — `results/grid_heatmap.png` now holds the full 100×100 result); its
+shape (higher Δ where beta is larger and alpha is moderate) is qualitatively
+consistent with the paper's Figure 1.
 
 **To scale this up further**: increase `N_ALPHA`/`N_BETA`/`N_SESSIONS` in
 `slurm/run_grid.slurm` and update the `sbatch --array` upper bound to match
@@ -381,5 +380,45 @@ this was purely a `max_periods` budget effect, not a sign that some
 down slightly (0.822 -> 0.807) makes sense too: the newly-converged cells are
 concentrated at low beta, and low beta (slow exploration decay) is exactly
 where the paper's own Figure 1 shows lower Δ, so including them pulls the
-average down a bit rather than up. Current heatmap:
-`results/grid_heatmap.png` (100% filled, no gaps).
+average down a bit rather than up. Archived to `results/grid_10x10_10M/` and
+`results/grid_heatmap_10x10_10M.png` once superseded by the full-scale run
+below.
+
+**Full-scale run (2026-09-17): 100×100 grid, max_periods=20M — matches the
+paper's original resolution**. Before submitting, estimated the cost from
+the two prior runs' actual `elapsed_sec`/`n_periods` data (~52-55s/session
+average, ~2900 core-hours total for 200,000 sessions, ~70-90 min of work per
+array task at 24 cores/task); wall-clock was expected to depend on how many
+of the 100 array tasks the cluster scheduled concurrently (as few as 2-6 ran
+at once at any given moment, based on `squeue` checks during the run).
+
+Before submitting, had to clean up a subtle leftover: `git pull` silently
+skips any path that doesn't exist in either endpoint commit's tree, so the
+untracked 10×10 result files sitting directly on Longleaf's disk (written
+there by the SLURM job itself, never `git add`-ed on that machine) survived
+completely unnoticed through a pull that both introduced and renamed away
+that same path in the intervening history — no conflict, no error, just
+silently stale files left at `results/grid/`. Caught by noticing
+`results/grid/` still existed post-pull with the old 10×10 file sizes; fixed
+by checksumming against the archived copy (confirmed identical) and deleting
+before submitting the new job. Anyone repeating this grid-resolution-change
+pattern on Longleaf should check for this rather than assume a clean `git
+pull` implies a clean `results/grid/`.
+
+All 100 array tasks `COMPLETED`. Results:
+
+| Metric | 20×20, 2M | 10×10, 10M | 100×100, 20M |
+|---|---|---|---|
+| Cells completed | 269 / 400 (67%) | 100 / 100 (100%) | 10,000 / 10,000 (100%) |
+| Sessions converged | 4,542 / 8,000 (57%) | 1,999 / 2,000 (99.95%) | 200,000 / 200,000 (100%) |
+| Mean Δ | 0.822 | 0.807 | 0.813 |
+| Share in the paper's [0.70, 0.90] range | 96.3% | 98.0% | 94.9% |
+
+Every single one of the 200,000 sessions converged — the full paper-scale
+grid confirms the pattern seen at 10×10: given enough periods, this isn't a
+knife-edge phenomenon anywhere on the grid. Mean Δ=0.813 sits close to the
+paper's Table 1 "All" column (0.849); the heatmap
+(`results/grid_heatmap.png`) is visually uniform and dark blue across nearly
+the whole grid, consistent with the paper's own Figure 1 finding that Δ
+holds in a fairly narrow 70-90% band across most of the (alpha, beta) space
+rather than varying dramatically with either parameter.
