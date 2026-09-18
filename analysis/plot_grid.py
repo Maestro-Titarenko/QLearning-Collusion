@@ -103,11 +103,23 @@ def main() -> None:
     n_cells_total = args.n_alpha * args.n_beta
     all_deltas = delta_mean[~np.isnan(delta_mean)]
 
+    # A fixed 0-1 scale is the theoretically meaningful range (0=competitive,
+    # 1=full collusion), but the actual cell means land in a much narrower
+    # band (empirically ~0.62-0.95 here) -- stretching the colormap over the
+    # full 0-1 range crushes almost all of that real variation into the top
+    # third of the color scale and makes the grid look artificially uniform.
+    # Scaling to the 1st/99th percentile of the actual data instead spends
+    # the whole color range on the variation that's actually present.
+    if len(all_deltas) > 0:
+        vmin, vmax = np.percentile(all_deltas, [1, 99])
+    else:
+        vmin, vmax = 0.0, 1.0
+
     fig, ax = plt.subplots(figsize=(6.8, 5.4), facecolor=SURFACE)
     ax.set_facecolor(SURFACE)
 
     im = ax.pcolormesh(
-        betas, alphas, delta_mean, cmap=BLUE_SEQUENTIAL, vmin=0.0, vmax=1.0, shading="nearest",
+        betas, alphas, delta_mean, cmap=BLUE_SEQUENTIAL, vmin=vmin, vmax=vmax, shading="nearest",
     )
     ax.set_xscale("log")
     ax.set_xlabel("beta (exploration decay rate, log scale)", color=INK_SECONDARY, fontsize=10)
@@ -121,7 +133,7 @@ def main() -> None:
     )
 
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label("Mean profit gain Δ", color=INK_SECONDARY, fontsize=9)
+    cbar.set_label(f"Mean profit gain Δ (color scaled to {vmin:.2f}-{vmax:.2f}, the actual data range)", color=INK_SECONDARY, fontsize=9)
     cbar.ax.tick_params(colors=INK_MUTED, labelsize=8)
 
     fig.tight_layout()

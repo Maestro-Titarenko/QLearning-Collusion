@@ -417,8 +417,20 @@ All 100 array tasks `COMPLETED`. Results:
 Every single one of the 200,000 sessions converged — the full paper-scale
 grid confirms the pattern seen at 10×10: given enough periods, this isn't a
 knife-edge phenomenon anywhere on the grid. Mean Δ=0.813 sits close to the
-paper's Table 1 "All" column (0.849); the heatmap
-(`results/grid_heatmap.png`) is visually uniform and dark blue across nearly
-the whole grid, consistent with the paper's own Figure 1 finding that Δ
-holds in a fairly narrow 70-90% band across most of the (alpha, beta) space
-rather than varying dramatically with either parameter.
+paper's Table 1 "All" column (0.849).
+
+**Heatmap color scale (`analysis/plot_grid.py`)**: the first version of
+`results/grid_heatmap.png` fixed the color scale to the full theoretical
+[0,1] range, which made the grid look almost uniformly dark blue — because
+the actual per-cell means only span about 0.62-0.95 (the 1st-99th percentile
+of the 10,000 cells), fixing the scale to [0,1] crushes all of that real
+variation into the top third of the color range. Rescaling the color map to
+the actual data's 1st/99th percentile instead (still a single-hue sequential
+scale, per the dataviz skill's guidance for magnitude data — just with its
+range matched to the data rather than the metric's theoretical bounds)
+reveals real structure: Δ is highest (darkest) at low alpha combined with
+mid-to-high beta, and lowest (lightest) in the upper-left corner — high
+alpha (fast learning) paired with low beta (slow exploration decay).
+Otherwise consistent with the paper's own Figure 1 finding that Δ holds in a
+fairly narrow band across most of the (alpha, beta) space rather than
+varying by an order of magnitude.
